@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-docker"
+version = "1.0.0"
+description = "AI-powered Docker assistant using natural language commands"
+readme = "README.md"
+authors = [
+    {name = "Agentic Docker Team", email = "team@agentic-docker.example.com"}
+]
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: System :: Systems Administration",
+    "Topic :: Utilities"
+]
+keywords = ["docker", "ai", "nlp", "mcp", "ollama", "llm"]
+dependencies = [
+    "typer>=0.9.0",
+    "ollama>=0.1.0",
+    "docker>=7.0.0",
+    "json-rpc>=1.13.0",
+    "pydantic>=2.0.0",
+    "requests>=2.28.0",
+    "werkzeug>=2.0.0"
+]
+requires-python = ">=3.9"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0"
+]
+
+[project.scripts]
+agentic-docker = "agentic_docker.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/your-username/agentic-docker"
+Repository = "https://github.com/your-username/agentic-docker"
+"Bug Tracker" = "https://github.com/your-username/agentic-docker/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agentic_docker*"]
