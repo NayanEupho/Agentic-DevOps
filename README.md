@@ -42,11 +42,9 @@ graph TD
     Safety -->|Confirmation?| User
     Safety -->|Approved| MCP_Client[MCP Client]
     
-    subgraph Routing Logic
-        MCP_Client -->|docker_*| DockerServer[Docker MCP Server (8080)]
-        MCP_Client -->|k8s_*| LocalK8sServer[Local K8s MCP Server (8081)]
-        MCP_Client -->|remote_k8s_*| RemoteK8sServer[Remote K8s MCP Server (8082)]
-    end
+    MCP_Client -->|docker_*| DockerServer[Docker MCP Server 8080]
+    MCP_Client -->|k8s_*| LocalK8sServer[Local K8s MCP Server 8081]
+    MCP_Client -->|remote_k8s_*| RemoteK8sServer[Remote K8s MCP Server 8082]
     
     DockerServer -->|Execute| Docker[Docker Engine]
     LocalK8sServer -->|Execute| LocalK8s[Local K8s Cluster]
