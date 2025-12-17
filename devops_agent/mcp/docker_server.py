@@ -133,7 +133,7 @@ def start_mcp_server(host: str = None, port: int = None):
         host = settings.MCP_SERVER_HOST
     if port is None:
         port = settings.DOCKER_PORT
-    print(f"🚀 MCP Server running at http://{host}:{port}")
+    print(f"🚀 Docker MCP Server running at http://{host}:{port}")
     print(f"   Available tools: {[tool.name for tool in ALL_TOOLS]}")
     print("   Press Ctrl+C to stop the server")
     

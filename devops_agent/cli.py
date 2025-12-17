@@ -14,7 +14,7 @@ from typing import Optional
 # Import our agent that processes queries
 from .agent import process_query_with_status_check
 # Import the MCP server function
-from .mcp.server import start_mcp_server
+from .mcp.docker_server import start_mcp_server
 # Import the K8s MCP server function
 from .mcp.local_k8s_server import start_k8s_mcp_server
 # Import system status function

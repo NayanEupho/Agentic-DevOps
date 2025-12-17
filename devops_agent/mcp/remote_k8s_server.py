@@ -87,9 +87,9 @@ def start_remote_k8s_mcp_server(host: str = '127.0.0.1', port: int = 8082):
         verify_ssl=False  # Assuming self-signed cert or no CA provided
     )
     
-    print(f"Remote Kubernetes MCP Server running at http://{host}:{port}")
-    print(f"   Target Cluster: {REMOTE_API_URL}")
+    print(f"🚀 Remote Kubernetes MCP Server running at http://{host}:{port}")
     print(f"   Available Remote K8s tools: {[tool.name for tool in ALL_REMOTE_K8S_TOOLS]}")
+    print(f"   Target Cluster: {REMOTE_API_URL}")
     print("   Press Ctrl+C to stop the server")
     
     run_simple(
