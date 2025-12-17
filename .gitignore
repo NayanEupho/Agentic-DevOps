@@ -62,3 +62,21 @@ token.txt
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Persistence
+*.db
+*.sqlite
+*.sqlite3
+
+# Agent Session Data
+.agent_sessions.json
+.agent_active_session
+
+# Debug and Temporary Files
+debug_*.txt
+llm_debug.log
+debug_output.txt
+
+# Certificates
+*.pem
+*.key

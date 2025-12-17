@@ -1,9 +1,43 @@
+# Architecture and Developer Guide
+
+This document provides a comprehensive overview of the Agentic Docker architecture, explaining how the components interact, the lifecycle of a command, and the technical decisions behind the system.
+
+## 1. Introduction
+
+Agentic Docker is an AI-powered CLI tool that allows users to manage Docker and Kubernetes resources using natural language. Unlike simple "text-to-command" wrappers, it uses an agentic architecture (planning, reasoning, verification) to ensure safety and reliability.
+
+The system is designed to be:
+- **Private:** Uses local LLMs (Ollama) by default.
+- **Safe:** Implements a safety layer with user confirmation for destructive actions.
+- **Extensible:** Built on the Model Context Protocol (MCP) to easily add new capabilities.
+
+## 2. System Overview
+
+The system consists of three main layers:
+
+1.  **User Interface (CLI):** A Typer-based CLI that handles input, rendering, and session management.
+2.  **Orchestration Layer (Agent):** A Python-based agent (using DSPy) that reasons about user intent, selects tools, and validates actions.
+3.  **Execution Layer (MCP Servers):** Three independent servers (Docker, Local K8s, Remote K8s) that expose functionality via JSON-RPC.
+
+## 3. Core Technologies
+
+- **Python 3.9+:** The core language.
+- **Typer:** For building the CLI.
+- **DSPy:** For declarative and robust LLM orchestration (replacing brittle prompt engineering).
+- **Ollama:** For running local or remote LLMs (e.g., Llama 3.2, Qwen 2.5).
+- **Model Context Protocol (MCP):** A standard protocol for connecting AI agents to external systems.
+- **Pydantic:** For data validation and schema generation.
+
+---
+
+## 4. Architecture Diagram
+
 ```mermaid
 graph TD
-    User[User Input] -->|1. Natural Language| CLI[CLI (Typer)]
+    User[User Input] -->|1. Natural Language| CLI["CLI (Typer)"]
     CLI -->|2. Pass Query| Agent[Agent Orchestrator]
-    Agent -->|3. Inject Context| State[State Fetcher (Docker/K8s)]
-    Agent -->|4. ReAct Loop| LLM[Ollama (Reasoning + Tool Call)]
+    Agent -->|3. Inject Context| State["State Fetcher (Docker/K8s)"]
+    Agent -->|4. ReAct Loop| LLM["Ollama (Reasoning + Tool Call)"]
     LLM -->|5. Return Thought & JSON| Agent
     Agent -->|6. Semantic Verification| Verifier[Validation Logic]
     Verifier -- Invalid? --> LLM
@@ -32,7 +66,7 @@ graph TD
 
 ---
 
-## 4. The Lifecycle of a Command
+## 5. The Lifecycle of a Command
 
 Let's trace exactly what happens when you run a command.
 
@@ -112,9 +146,9 @@ agentic-docker run "Describe pod nginx-123"
 
 ---
 
-## 5. Component Deep Dive
+## 6. Component Deep Dive
 
-### 5.1 The CLI (`cli.py`)
+### 6.1 The CLI (`cli.py`)
 The CLI is the user-facing interface. It uses the **Typer** library to create a professional command-line interface.
 
 **Key Features:**
@@ -126,14 +160,14 @@ The CLI is the user-facing interface. It uses the **Typer** library to create a 
 - `run_command()`: The main entry point for user queries.
 - `start_all_servers()`: Orchestrates the multi-process startup.
 
-### 5.2 The Agent (`agent.py`)
+### 6.2 The Agent (`agent.py`)
 The Agent is the central orchestrator. It coordinates communication between the CLI, LLM, and MCP servers.
 
 **Key Functions:**
 - `process_query()`: The main workflow function that processes a user query.
 - `format_tool_result()`: Formats complex dictionaries (Pods, Services) into pretty CLI tables/lists.
 
-### 5.3 DSPy Agent (`agent_module.py`)
+### 6.3 DSPy Agent (`agent_module.py`)
 The project uses **DSPy** (Declarative Self-improving Python) to orchestrate the LLM interactions.
 
 **Key Components:**
@@ -142,10 +176,10 @@ The project uses **DSPy** (Declarative Self-improving Python) to orchestrate the
     - **SmartAgent:** Uses `dspy.ChainOfThought` for complex reasoning (~5-8s).
 - **Robust Parsing:** Includes a custom retry mechanism (`max_retries=2`) that feeds parsing errors back to the LLM to self-correct.
 
-### 5.4 MCP Client (`mcp/client.py`)
+### 6.4 MCP Client (`mcp/client.py`)
 The MCP client sends JSON-RPC 2.0 requests to the MCP servers.
 
-### 5.5 MCP Servers
+### 6.5 MCP Servers
 The project uses three separate MCP servers, each running on a different port:
 
 #### Docker MCP Server (`mcp/server.py`)
@@ -174,7 +208,7 @@ Each server follows the same pattern:
 3. **Register Methods:** Add each handler to the JSON-RPC dispatcher.
 4. **Start Server:** Run the Werkzeug WSGI server.
 
-### 5.6 Tools (`tools/` and `k8s_tools/`)
+### 6.6 Tools (`tools/` and `k8s_tools/`)
 Tools are the actual implementations of Docker and Kubernetes operations. They follow a consistent interface defined by the `Tool` base class.
 
 #### Tool Interface
@@ -192,14 +226,14 @@ class Tool:
         pass
 ```
 
-### 5.7 Safety Layer (`safety.py`)
+### 6.7 Safety Layer (`safety.py`)
 The safety layer prevents accidental destructive operations by requiring user confirmation.
 
 **Key Functions:**
 - `confirm_action()`: Prompts the user for confirmation before executing dangerous operations.
 - `confirm_action_auto()`: Automatically selects the appropriate confirmation method.
 
-### 5.8 Session Manager (`session_manager.py`)
+### 6.8 Session Manager (`session_manager.py`)
 The Session Manager handles conversation history, allowing the Agent to remember context (e.g., "describe *that* pod").
 
 **Key Features:**
@@ -209,29 +243,29 @@ The Session Manager handles conversation history, allowing the Agent to remember
 
 ---
 
-## 6. Multi-Server Architecture Benefits
+## 7. Multi-Server Architecture Benefits
 
 The Multi-MCP architecture provides several key benefits:
 
-### 6.1 Isolation
+### 7.1 Isolation
 - **Separate Processes:** Each server runs in its own process, preventing one server's issues from affecting others.
 - **Resource Management:** Each server can be monitored and managed independently.
 
-### 6.2 Scalability
+### 7.2 Scalability
 - **Independent Scaling:** You can run servers on different machines if needed.
 - **Load Distribution:** Different domains (Docker, K8s) don't compete for the same server resources.
 
-### 6.3 Maintainability
+### 7.3 Maintainability
 - **Clear Boundaries:** Each server has a specific responsibility, making code easier to understand and maintain.
 - **Independent Development:** Teams can work on different servers without conflicts.
 
-### 6.4 Reliability
+### 7.4 Reliability
 - **Fault Tolerance:** If one server crashes, the others continue to work.
 - **Graceful Degradation:** The system can still function with some servers down.
 
 ---
 
-## 7. Command Chaining
+## 8. Command Chaining
 
 The system supports **command chaining**, allowing multiple operations in a single query. This is achieved by having the LLM return a list of tool calls instead of a single call.
 
@@ -274,32 +308,32 @@ The system supports **command chaining**, allowing multiple operations in a sing
 
 ---
 
-## 8. Error Handling
+## 9. Error Handling
 
 The system includes comprehensive error handling at multiple levels:
 
-### 8.1 LLM Errors
+### 9.1 LLM Errors
 - **Connection Issues:** If Ollama is not running, the system provides a clear error message.
 - **Model Issues:** If the model is not available, the system attempts to download it.
 - **Parsing Errors:** If the LLM returns invalid JSON, the system handles it gracefully.
 
-### 8.2 MCP Server Errors
+### 9.2 MCP Server Errors
 - **Connection Issues:** If a server is not running, the system provides a helpful error message.
 - **Timeout Errors:** If a server takes too long to respond, the system times out gracefully.
 - **Tool Errors:** If a tool execution fails, the error is captured and returned to the user.
 
-### 8.3 Tool Execution Errors
+### 9.3 Tool Execution Errors
 - **Validation Errors:** If tool arguments are invalid, Pydantic validation catches them.
 - **Runtime Errors:** If a tool fails during execution, the error is captured and returned.
 - **Permission Errors:** If Docker/Kubernetes permissions are insufficient, the error is clearly reported.
 
 ---
 
-## 9. Configuration and Customization
+## 10. Configuration and Customization
 
 The system can be configured through environment variables and configuration files.
 
-### 9.1 Environment Variables
+### 10.1 Environment Variables
 - `AGENTIC_DOCKER_HOST`: Host for MCP servers (default: 127.0.0.1)
 - `AGENTIC_DOCKER_PORT`: Port for Docker MCP server (default: 8080)
 - `AGENTIC_K8S_PORT`: Port for Local K8s MCP server (default: 8081)
@@ -307,7 +341,7 @@ The system can be configured through environment variables and configuration fil
 - `AGENTIC_LLM_MODEL`: LLM model to use (default: llama3.2)
 - `AGENTIC_SAFETY_CONFIRM`: Enable/disable safety confirmation (default: true)
 
-### 9.2 Adding New Tools
+### 10.2 Adding New Tools
 To add a new tool:
 
 1. **Create the Tool Class:**
@@ -350,55 +384,55 @@ ALL_TOOLS: List[Tool] = [
 
 ---
 
-## 10. Testing
+## 11. Testing
 
 The project includes a comprehensive test suite to ensure reliability.
 
-### 10.1 Unit Tests
+### 11.1 Unit Tests
 - **Tool Tests:** Test individual tool functionality.
 - **LLM Tests:** Test LLM integration and tool selection.
 - **Safety Tests:** Test safety confirmation logic.
 
-### 10.2 Integration Tests
+### 11.2 Integration Tests
 - **End-to-End Tests:** Test complete workflows from query to result.
 - **Multi-Server Tests:** Test the interaction between different servers.
 - **Error Handling Tests:** Test error scenarios and recovery.
 
-### 10.3 Performance Tests
+### 11.3 Performance Tests
 - **Tool Execution Time:** Measure how long tools take to execute.
 - **LLM Response Time:** Measure LLM response times.
 - **MCP Server Latency:** Measure server response times.
 
 ---
 
-## 11. Future Enhancements
+## 12. Future Enhancements
 
 The project is designed to be extensible. Here are some potential future enhancements:
 
-### 11.1 Additional Tool Categories
+### 12.1 Additional Tool Categories
 - **Image Management:** Pull, push, build, tag images.
 - **Network Management:** Create, inspect, remove networks.
 - **Volume Management:** Create, inspect, remove volumes.
 - **Compose Support:** Manage Docker Compose applications.
 
-### 11.2 Advanced LLM Features
+### 12.2 Advanced LLM Features
 - **Context Awareness:** Remember previous interactions for better responses.
 - **Multi-Modal Input:** Support for images and other input types.
 - **Custom Prompts:** Allow users to customize LLM prompts.
 
-### 11.3 Enhanced Safety
+### 12.3 Enhanced Safety
 - **Risk Assessment:** Automatically assess the risk level of operations.
 - **Approval Workflows:** Require multiple approvals for high-risk operations.
 - **Audit Logging:** Log all operations for compliance and debugging.
 
-### 11.4 Performance Improvements
+### 12.4 Performance Improvements
 - **Caching:** Cache frequently used tool results.
 - **Parallel Execution:** Execute independent tools in parallel.
 - **Resource Monitoring:** Monitor system resources and adjust behavior accordingly.
 
 ---
 
-## 12. Conclusion
+## 13. Conclusion
 
 The Agentic Docker project demonstrates a sophisticated approach to AI-powered DevOps tooling. By combining local LLMs, the Model Context Protocol, and a multi-server architecture, it provides a powerful and flexible platform for managing Docker and Kubernetes clusters using natural language.
 

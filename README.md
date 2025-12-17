@@ -47,9 +47,9 @@ An AI-powered Docker assistant that understands natural language commands. This 
 
 ```mermaid
 graph TD
-    User[User] -->|Natural Language Command| CLI[CLI (Typer)]
+    User[User] -->|Natural Language Command| CLI["CLI (Typer)"]
     CLI -->|Query| Agent[Agent Orchestrator]
-    Agent -->|1. Inject Context| StateFetcher[State Injection (Docker/K8s)]
+    Agent -->|1. Inject Context| StateFetcher["State Injection (Docker/K8s)"]
     Agent -->|2. ReAct Loop| LLM[LLM (Ollama)]
     LLM -->|Thought + Action| Agent
     Agent -->|3. Verify & Retry| Verifier[Semantic Verifier]
