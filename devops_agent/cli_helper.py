@@ -19,13 +19,9 @@ def process_command_turn(
     from .agent import process_query_with_status_check
     from .database.session_manager import session_manager
     
-    # Import safety module to potentially modify confirmation behavior
-    from .safety import USE_DETAILED_CONFIRMATION
-    import devops_agent.safety as safety_module
-    
-    original_detailed = safety_module.USE_DETAILED_CONFIRMATION
-    if no_confirm:
-        safety_module.USE_DETAILED_CONFIRMATION = False
+    # Legacy safety flags removed in Phase 6
+    # from .safety import USE_DETAILED_CONFIRMATION
+    # if no_confirm: ... handled in logic below
     
     try:
         # Log user query
@@ -47,6 +43,44 @@ def process_command_turn(
         # Process the query
         result_pkg = process_query_with_status_check(query, history, check_llm=check_llm)
         
+        # --- PHASE 6: CLI SAFETY CONFIRMATION ---
+        if result_pkg.get("confirmation_request") and not no_confirm:
+            req = result_pkg["confirmation_request"]
+            tool_name = req["tool"]
+            args = req["arguments"]
+            risk = req.get("risk", {})
+            
+            typer.echo("\n" + "="*60)
+            typer.echo(f"🚨 APPROVAL REQUIRED: {tool_name}")
+            typer.echo(f"⚠️  Risk: {risk.get('risk_level', 'UNKNOWN')}")
+            typer.echo(f"   Reason: {risk.get('reason', '')}")
+            if risk.get("impact_analysis"):
+                typer.echo("\n   Impact:")
+                for impact in risk["impact_analysis"]:
+                    typer.echo(f"   • {impact}")
+                    
+            typer.echo("\n   Arguments:")
+            typer.echo(f"   {args}")
+            typer.echo("="*60)
+            
+            if typer.confirm("Do you want to proceed?"):
+                typer.echo(f"\n🚀 Executing {tool_name}...")
+                # Bypass Agent and call directly
+                from .mcp.client import call_tool_async
+                import asyncio
+                from .agent import format_tool_result
+                
+                # Execute
+                raw_result = asyncio.run(call_tool_async(tool_name, args))
+                formatted = format_tool_result(tool_name, raw_result)
+                
+                # Update result_pkg for standard logging downstream
+                result_pkg["output"] = formatted
+                result_pkg["tool_calls"] = [{"name": tool_name, "arguments": args}]
+            else:
+                typer.echo("❌ Action cancelled.")
+                return
+
         # --- DISAMBIGUATION HANDLING ---
         if result_pkg.get("disambiguation_needed"):
             options = result_pkg.get("options", {})
@@ -102,9 +136,7 @@ def process_command_turn(
     except Exception as e:
         typer.echo(f"❌ Error: {str(e)}")
     
-    finally:
-        # Restore safety
-        safety_module.USE_DETAILED_CONFIRMATION = original_detailed
+        pass # Safety cleanup handled automatically
 
 def stream_echo(text: str, speed: float = 0.01):
     """Simulate streaming output like a modern LLM interface."""

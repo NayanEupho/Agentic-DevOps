@@ -28,11 +28,11 @@ class LocalK8sListPodsTool(K8sTool):
     
     # Define the unique name for this tool
     # This name will be used by the LLM to call this specific tool
-    name = "k8s_list_pods"
+    name = "local_k8s_list_pods"
     
     # Provide a human-readable description of what this tool does
     # The LLM will use this description to understand when to use this tool
-    description = "List Kubernetes pods in a namespace or across all namespaces"
+    description = "List Kubernetes pods in a namespace or across all namespaces. Use status_phase (enum) for lightning-fast filtering by pod state (Running, Pending, etc.)."
     
     def get_parameters_schema(self) -> Dict[str, Any]:
         """
@@ -67,135 +67,79 @@ class LocalK8sListPodsTool(K8sTool):
                 "node_name": {
                     "type": "string",
                     "description": "Filter pods by node name. Example: 'kc-m1'."
+                },
+                # 'status_phase' parameter: string type, optional
+                "status_phase": {
+                    "type": "string",
+                    "enum": ["Pending", "Running", "Succeeded", "Failed", "Unknown"],
+                    "description": "Filter pods by their phase (e.g., 'Running', 'Pending'). HIGHLY RECOMMENDED for speed and accuracy."
+                },
+                # 'label_selector' parameter: string type, optional
+                "label_selector": {
+                    "type": "string",
+                    "description": "Filter pods by labels (e.g., 'app=nginx', 'env=prod'). Use standard Kubernetes label selector syntax."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of items to return. Default is 50."
                 }
             },
             # List of required parameters (empty list means all parameters are optional)
             "required": []
         }
 
-    def run(self, namespace: str = "default", all_namespaces: bool = False, node_name: str = None) -> Dict[str, Any]:
-        """
-        Execute the actual Kubernetes command to list pods.
-        
-        This method makes an HTTP GET request to the Kubernetes API
-        to retrieve pod information, then formats the result.
-        
-        Args:
-            namespace (str): The namespace to list pods from (default: "default")
-            all_namespaces (bool): If True, list pods from all namespaces (default: False)
-            node_name (str): Optional node name to filter by.
-        
-        Returns:
-            dict: A structured result containing either:
-                  - success: True, pods: [list of pod info], count: number of pods
-                  - success: False, error: [error message]
-        """
+    def run(self, namespace: str = "default", all_namespaces: bool = False, node_name: str = None, status_phase: str = None, label_selector: str = None, limit: int = 50) -> Dict[str, Any]:
+        from .k8s_utils import safe_k8s_request
         api_url = k8s_config.get_api_url()
         headers = k8s_config.get_headers()
         verify_ssl = k8s_config.get_verify_ssl()
 
-        try:
-            # Determine the API endpoint based on whether we want all namespaces
-            if all_namespaces:
-                # List pods across all namespaces
-                url = f"{api_url}/api/v1/pods"
-            else:
-                # List pods in a specific namespace
-                url = f"{api_url}/api/v1/namespaces/{namespace}/pods"
-            
-            # Prepare query parameters
-            params = {}
-            if node_name:
-                # Use fieldSelector to filter by node name
-                params['fieldSelector'] = f"spec.nodeName={node_name}"
-            
-            # Make the HTTP GET request to the Kubernetes API
-            # We disable SSL warning if verify is False
-            if not verify_ssl:
-                requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
+        if all_namespaces:
+            url = f"{api_url}/api/v1/pods"
+        else:
+            url = f"{api_url}/api/v1/namespaces/{namespace}/pods"
+        
+        params = {}
+        field_selectors = []
+        if node_name: field_selectors.append(f"spec.nodeName={node_name}")
+        if status_phase: field_selectors.append(f"status.phase={status_phase}")
+        if field_selectors: params['fieldSelector'] = ",".join(field_selectors)
+        if label_selector: params['labelSelector'] = label_selector
+        if limit: params['limit'] = limit
+        
+        res = safe_k8s_request("GET", url, headers, verify_ssl, params=params)
+        
+        if not res["success"]:
+            return res
 
-            response = requests.get(url, headers=headers, params=params, verify=verify_ssl, timeout=10)
+        data = res["data"]
+        pods_list = data.get("items", [])
+        formatted_pods = []
+        
+        for pod in pods_list:
+            metadata = pod.get("metadata", {})
+            status = pod.get("status", {})
+            spec = pod.get("spec", {})
             
-            # Check if the request was successful
-            response.raise_for_status()
-            
-            # Parse the JSON response
-            data = response.json()
-            
-            # Extract pods from the response
-            pods_list = data.get("items", [])
-            
-            # Format the pod information into a list of dictionaries
-            # Each dictionary contains essential information about a pod
-            formatted_pods = []
-            for pod in pods_list:
-                # Extract metadata and status information
-                metadata = pod.get("metadata", {})
-                status = pod.get("status", {})
-                spec = pod.get("spec", {})
-                
-                # Create a dictionary with pod information
-                pod_info = {
-                    # Pod name
-                    "name": metadata.get("name", "unknown"),
-                    # Namespace the pod belongs to
-                    "namespace": metadata.get("namespace", "unknown"),
-                    # Pod phase (Running, Pending, Succeeded, Failed, Unknown)
-                    "phase": status.get("phase", "Unknown"),
-                    # Pod IP address
-                    "pod_ip": status.get("podIP", "N/A"),
-                    # Node the pod is running on
-                    "node": spec.get("nodeName", "N/A"),
-                    # Number of containers in the pod
-                    "containers": len(spec.get("containers", [])),
-                    # Ready status
-                    "ready": self._get_ready_status(status),
-                }
-                
-                # Add this pod's info to our list
-                formatted_pods.append(pod_info)
-            
-            # Return successful result with the list of pods
-            return {
-                "success": True,
-                "pods": formatted_pods,
-                "count": len(formatted_pods),
-                "namespace": "all" if all_namespaces else namespace,
-                "filtered_by_node": node_name
-            }
-            
-        except requests.exceptions.ConnectionError:
-            # Handle the case where the API is not reachable
-            return {
-                "success": False,
-                "error": f"Cannot connect to Kubernetes API at {api_url}. "
-                        "Check your network connection and configuration.",
-                "pods": []
-            }
-            
-        except requests.exceptions.Timeout:
-            # Handle request timeout
-            return {
-                "success": False,
-                "error": "Request to Kubernetes API timed out after 10 seconds",
-                "pods": []
-            }
-            
-        except requests.exceptions.HTTPError as e:
-            # Handle HTTP errors (404, 403, etc.)
-            return {
-                "success": False,
-                "error": f"Kubernetes API returned error: {e.response.status_code} - {e.response.reason}",
-                "pods": []
-            }
-            
-        except Exception as e:
-            # If anything else goes wrong, catch the exception and return an error
-            return {
-                "success": False,
-                "error": f"Unexpected error: {str(e)}",
-                "pods": []
-            }
+            formatted_pods.append({
+                "name": metadata.get("name", "unknown"),
+                "namespace": metadata.get("namespace", "unknown"),
+                "phase": status.get("phase", "Unknown"),
+                "pod_ip": status.get("podIP", "N/A"),
+                "node": spec.get("nodeName", "N/A"),
+                "containers": len(spec.get("containers", [])),
+                "ready": self._get_ready_status(status),
+            })
+        
+        return {
+            "success": True,
+            "pods": formatted_pods,
+            "count": len(formatted_pods),
+            "namespace": "all" if all_namespaces else namespace,
+            "filtered_by_node": node_name,
+            "filtered_by_status": status_phase,
+            "filtered_by_labels": label_selector
+        }
     
     def _get_ready_status(self, status: Dict[str, Any]) -> str:
         """

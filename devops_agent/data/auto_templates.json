@@ -1,0 +1,132 @@
+{
+  "templates": [
+    {
+      "name": "auto_local_k8s_list_pods",
+      "pattern": "local (?:list|show) (?:all )?pods",
+      "tool": "local_k8s_list_pods",
+      "args": {},
+      "auto_generated": true
+    },
+    {
+      "name": "auto_local_k8s_list_nodes",
+      "pattern": "local (?:list|show) (?:all )?nodes",
+      "tool": "local_k8s_list_nodes",
+      "args": {},
+      "auto_generated": true
+    },
+    {
+      "name": "auto_local_k8s_describe_pod",
+      "pattern": "local describe (?:the )?(?:pod )?(?P<pod>[\\w-]+)",
+      "tool": "local_k8s_describe_pod",
+      "args": {
+        "pod_name": "{pod}",
+        "namespace": "default"
+      },
+      "auto_generated": true
+    },
+    {
+      "name": "auto_remote_k8s_list_pods",
+      "pattern": "remote (?:list|show) (?:all )?pods",
+      "tool": "remote_k8s_list_pods",
+      "args": {},
+      "auto_generated": true
+    },
+    {
+      "name": "auto_remote_k8s_list_nodes",
+      "pattern": "remote (?:list|show) (?:all )?nodes",
+      "tool": "remote_k8s_list_nodes",
+      "args": {},
+      "auto_generated": true
+    },
+    {
+      "name": "auto_remote_k8s_list_namespaces",
+      "pattern": "remote (?:list|show) (?:all )?namespaces",
+      "tool": "remote_k8s_list_namespaces",
+      "args": {},
+      "auto_generated": true
+    },
+    {
+      "name": "auto_remote_k8s_list_deployments",
+      "pattern": "remote (?:list|show) (?:all )?deployments",
+      "tool": "remote_k8s_list_deployments",
+      "args": {},
+      "auto_generated": true
+    },
+    {
+      "name": "auto_remote_k8s_describe_deployment",
+      "pattern": "remote describe (?:the )?deployment (?P<deployment>[\\w-]+)",
+      "tool": "remote_k8s_describe_deployment",
+      "args": {
+        "deployment_name": "{deployment}"
+      },
+      "auto_generated": true
+    },
+    {
+      "name": "auto_remote_k8s_describe_node",
+      "pattern": "remote describe (?:the )?node (?P<node>[\\w-]+)",
+      "tool": "remote_k8s_describe_node",
+      "args": {
+        "node_name": "{node}"
+      },
+      "auto_generated": true
+    },
+    {
+      "name": "auto_remote_k8s_describe_pod",
+      "pattern": "remote describe (?:the )?(?:pod )?(?P<pod>[\\w-]+)",
+      "tool": "remote_k8s_describe_pod",
+      "args": {
+        "pod_name": "{pod}",
+        "namespace": "default"
+      },
+      "auto_generated": true
+    },
+    {
+      "name": "auto_remote_k8s_describe_namespace",
+      "pattern": "remote describe (?:the )?namespace (?P<namespace>[\\w-]+)",
+      "tool": "remote_k8s_describe_namespace",
+      "args": {
+        "namespace": "{namespace}"
+      },
+      "auto_generated": true
+    },
+    {
+      "name": "auto_remote_k8s_list_services",
+      "pattern": "remote (?:list|show) (?:all )?services",
+      "tool": "remote_k8s_list_services",
+      "args": {},
+      "auto_generated": true
+    },
+    {
+      "name": "auto_remote_k8s_describe_service",
+      "pattern": "remote describe (?:the )?service (?P<service>[\\w-]+)",
+      "tool": "remote_k8s_describe_service",
+      "args": {
+        "service_name": "{service}"
+      },
+      "auto_generated": true
+    },
+    {
+      "name": "auto_remote_k8s_get_logs",
+      "pattern": "remote (?:get |show )?logs (?:for )?(?:pod )?(?P<pod>[\\w-]+)",
+      "tool": "remote_k8s_get_logs",
+      "args": {
+        "pod_name": "{pod}"
+      },
+      "auto_generated": true
+    },
+    {
+      "name": "auto_remote_k8s_top_nodes",
+      "pattern": "remote (?:top|metrics for) nodes",
+      "tool": "remote_k8s_top_nodes",
+      "args": {},
+      "auto_generated": true
+    },
+    {
+      "name": "auto_remote_k8s_top_pods",
+      "pattern": "remote (?:top|metrics for) pods",
+      "tool": "remote_k8s_top_pods",
+      "args": {},
+      "auto_generated": true
+    }
+  ]
+}

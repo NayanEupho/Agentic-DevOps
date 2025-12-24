@@ -14,7 +14,7 @@ dist/
 downloads/
 eggs/
 .eggs/
-lib/
+/lib/
 lib64/
 parts/
 sdist/
@@ -42,7 +42,16 @@ coverage.xml
 
 # Environments
 .env
+.env.local
 .venv
+
+# RAG / ML Data
+devops_agent/data/*.bin
+devops_agent/data/*.lock
+devops_agent/data/embeddings_cache.json
+devops_agent/data/tool_embeddings.json
+devops_agent/data/faiss_metadata.json
+devops_agent/data/slow_queries.log
 env/
 venv/
 ENV/

@@ -16,6 +16,8 @@ from .local_k8s_list_pods import LocalK8sListPodsTool
 from .local_k8s_list_nodes import LocalK8sListNodesTool
 from .remote_k8s_tools import ALL_REMOTE_K8S_TOOLS
 
+from .local_k8s_describe_pod import LocalK8sDescribePodTool
+
 # Import typing utilities for type hints
 from typing import List, Optional
 
@@ -23,6 +25,7 @@ from typing import List, Optional
 ALL_LOCAL_K8S_TOOLS = [
     LocalK8sListPodsTool(),
     LocalK8sListNodesTool(),
+    LocalK8sDescribePodTool(),
 ]
 
 # Define the list of ALL available Kubernetes tools in the system
@@ -33,7 +36,7 @@ def get_all_tools():
 
 def get_k8s_tools_schema() -> List[dict]:
     """
-    Generate the JSON Schema for all available Kubernetes tools.
+    Generate the JSON Schema for ALL Kubernetes tools (Local + Remote).
     """
     return [
         {
@@ -42,6 +45,19 @@ def get_k8s_tools_schema() -> List[dict]:
             "parameters": tool.get_parameters_schema()
         }
         for tool in get_all_tools()
+    ]
+
+def get_local_k8s_tools_schema() -> List[dict]:
+    """
+    Generate the JSON Schema for LOCAL Kubernetes tools only.
+    """
+    return [
+        {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.get_parameters_schema()
+        }
+        for tool in ALL_LOCAL_K8S_TOOLS
     ]
 
 def find_k8s_tool_by_name(name: str) -> Optional[K8sTool]:

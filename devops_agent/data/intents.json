@@ -1,0 +1,113 @@
+{
+    "templates": [
+        {
+            "name": "logs_pod",
+            "pattern": "logs for (?P<pod>[\\w-]+)",
+            "tool": "remote_k8s_get_logs",
+            "args": {
+                "pod_name": "{pod}"
+            }
+        },
+        {
+            "name": "describe_pod",
+            "pattern": "describe pod (?P<pod>[\\w-]+)",
+            "tool": "local_k8s_describe_pod",
+            "args": {
+                "pod_name": "{pod}",
+                "namespace": "default"
+            }
+        },
+        {
+            "name": "remote_describe_pod",
+            "pattern": "describe remote pod (?P<pod>[\\w-]+)",
+            "tool": "remote_k8s_describe_pod",
+            "args": {
+                "pod_name": "{pod}",
+                "namespace": "default"
+            }
+        },
+        {
+            "name": "describe_node",
+            "pattern": "describe node (?P<node>[\\w-]+)",
+            "tool": "remote_k8s_describe_node",
+            "args": {
+                "node_name": "{node}"
+            }
+        },
+        {
+            "name": "check_status",
+            "pattern": "status of (?P<pod>[\\w-]+)",
+            "tool": "k8s_describe_pod",
+            "args": {
+                "pod_name": "{pod}",
+                "namespace": "default"
+            }
+        },
+        {
+            "name": "list_pods_ns",
+            "pattern": "list pods in (?P<ns>[\\w-]+)",
+            "tool": "local_k8s_list_pods",
+            "args": {
+                "namespace": "{ns}",
+                "limit": 50
+            }
+        },
+        {
+            "name": "list_running_pods",
+            "pattern": "list running pods",
+            "tool": "local_k8s_list_pods",
+            "args": {
+                "status_phase": "Running",
+                "limit": 50
+            }
+        }
+    ],
+    "semantic": [
+        {
+            "text": "list all pods",
+            "tool": "local_k8s_list_pods",
+            "args": {
+                "namespace": "default",
+                "limit": 50
+            }
+        },
+        {
+            "text": "show pending pods",
+            "tool": "local_k8s_list_pods",
+            "args": {
+                "status_phase": "Pending",
+                "limit": 50
+            }
+        },
+        {
+            "text": "what is running on remote",
+            "tool": "remote_k8s_list_pods",
+            "args": {
+                "namespace": "default",
+                "limit": 50
+            }
+        },
+        {
+            "text": "check remote nodes",
+            "tool": "remote_k8s_list_nodes",
+            "args": {}
+        },
+        {
+            "text": "show docker containers",
+            "tool": "docker_list_containers",
+            "args": {
+                "all": false
+            }
+        },
+        {
+            "text": "top remote nodes",
+            "tool": "remote_k8s_top_nodes",
+            "args": {}
+        },
+        {
+            "text": "cluster metric usage",
+            "tool": "remote_k8s_top_nodes",
+            "args": {}
+        }
+    ]
+}

@@ -1,12 +1,16 @@
-# requirements.txt
-# Core dependencies for the Agentic Docker project
+# Core Dependencies
+docker>=7.0.0
+kubernetes>=28.1.0
+requests>=2.31.0
+rich>=13.7.0
+typer>=0.9.0
+pytest>=8.0.0
 
-typer
-ollama
-docker
-json-rpc
-pydantic>=2.0.0
-pydantic-settings>=2.0.0
-httpx
-requests
-dspy-ai
+# LLM & AI
+ollama>=0.1.6
+dspy-ai>=2.1.0
+
+# API Server
+fastapi
+uvicorn
+json_repair>=0.19.0

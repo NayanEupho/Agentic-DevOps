@@ -20,6 +20,7 @@ from werkzeug.wrappers import Request, Response
 from typing import Any, Dict
 from devops_agent.k8s_tools.remote_k8s_tools import find_remote_k8s_tool_by_name, ALL_REMOTE_K8S_TOOLS
 from devops_agent.k8s_tools.k8s_config import k8s_config
+from devops_agent.settings import settings
 
 def create_k8s_tool_handler(tool_name: str):
     """
@@ -72,24 +73,23 @@ def start_remote_k8s_mcp_server(host: str = '127.0.0.1', port: int = 8082):
     Start the Remote Kubernetes MCP server.
     """
     # Configuration for remote cluster
-    REMOTE_API_URL = "https://10.20.4.221:16443"
-    TOKEN_FILE = "token.txt"
+    # Loaded from settings
     
     # Load token
-    print(f"Loading token from {TOKEN_FILE}...")
-    token = load_token(TOKEN_FILE)
+    print(f"Loading token from {settings.REMOTE_K8S_TOKEN_PATH}...")
+    token = load_token(settings.REMOTE_K8S_TOKEN_PATH)
     
     # Configure K8s tools
-    print(f"Configuring K8s tools for remote cluster at {REMOTE_API_URL}...")
+    print(f"Configuring K8s tools for remote cluster at {settings.REMOTE_K8S_API_URL}...")
     k8s_config.configure_remote(
-        api_url=REMOTE_API_URL,
+        api_url=settings.REMOTE_K8S_API_URL,
         token=token,
-        verify_ssl=False  # Assuming self-signed cert or no CA provided
+        verify_ssl=settings.REMOTE_K8S_VERIFY_SSL
     )
     
     print(f"🚀 Remote Kubernetes MCP Server running at http://{host}:{port}")
     print(f"   Available Remote K8s tools: {[tool.name for tool in ALL_REMOTE_K8S_TOOLS]}")
-    print(f"   Target Cluster: {REMOTE_API_URL}")
+    print(f"   Target Cluster: {settings.REMOTE_K8S_API_URL}")
     print("   Press Ctrl+C to stop the server")
     
     run_simple(

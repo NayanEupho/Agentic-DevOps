@@ -8,9 +8,21 @@ from pydantic import BaseModel, Field
 # =============================================
 
 class ToolCall(BaseModel):
-    """Schema for a single tool call."""
+    # ...
     name: str = Field(description="The EXACT name of the tool to call")
     arguments: Dict[str, Any] = Field(default_factory=dict, description="Arguments for the tool")
+
+class InsightAgent(dspy.Module):
+    """
+    Opinionated Analyst Agent.
+    Transforms raw tool results into expert insights.
+    """
+    def __init__(self):
+        super().__init__()
+        self.prog = dspy.Predict(InsightSignature)
+    
+    def forward(self, query: str, results_str: str) -> dspy.Prediction:
+        return self.prog(user_query=query, tool_results=results_str)
 
 # =============================================
 # DSPy Signature
@@ -20,7 +32,7 @@ class ToolCall(BaseModel):
 # DSPy Signatures
 # =============================================
 
-class FastDockerSignature(dspy.Signature):
+class FastDevOpsSignature(dspy.Signature):
     """
     You are a high-performance JSON API.
     Input: user_query, history_context, available_tools
@@ -28,7 +40,8 @@ class FastDockerSignature(dspy.Signature):
 
     Constraints:
     1. OUTPUT ONLY JSON. No thinking, no reasoning, no markdown, no specific comments.
-    2. Format: [{"name": "tool", "arguments": {}}]
+    2. Format: [{"name": "tool_name", "arguments": {"arg": "val"}}]
+    3. Do NOT use "tool_name" or "input" as keys. Use "name" and "arguments".
     """
     history_context: str = dspy.InputField(desc="JSON list of previous messages")
     available_tools: str = dspy.InputField(desc="JSON schema of tools")
@@ -36,24 +49,25 @@ class FastDockerSignature(dspy.Signature):
     
     tool_calls: str = dspy.OutputField(desc="JSON list")
 
-class DockerAgentSignature(dspy.Signature):
+class DevOpsAgentSignature(dspy.Signature):
     """
-    You are an intelligent Docker and Kubernetes Assistant.
+    You are an intelligent DevOps Assistant.
     Your goal is to map the user's natural language query to tool calls.
     
     Instructions:
     1. ANALYZE the 'history_context' and 'user_query'.
-    2. THINK step-by-step about which tool matches the user's intent. 
+    2. THINK step-by-step about which tool(s) match the user's intent.
     3. CHECK 'available_tools' to ensure the tool exists and arguments are correct.
-    4. OUTPUT a "Thought" explaining your reasoning.
-    5. OUTPUT the "tool_calls" as a JSON list.
+    4. IF the user asks for multiple things (e.g. "list pods and nodes"), RETURN MULTIPLE TOOL CALLS in the list.
+    5. IF the user is just saying "hi", generic chat, or asking a question that doesn't need a tool, USE the 'chat' tool.
+    6. OUTPUT the "tool_calls" as a JSON list.
 
     RICH CONTEXT:
     - If `System Context` is provided in the query, use it to resolve names (e.g. "restart web" -> "restart web-container-123").
 
     OUTPUT FORMAT:
     - Reasoning: [Your thought process]
-    - tool_calls: [{"name": "tool_name", "arguments": {...}}]
+    - tool_calls: [{"name": "tool_1", "arguments": {...}}, {"name": "tool_2", "arguments": {...}}]
     """
     
     history_context: str = dspy.InputField(desc="Previous conversation history")
@@ -62,19 +76,34 @@ class DockerAgentSignature(dspy.Signature):
     
     tool_calls: str = dspy.OutputField(desc="JSON list of tool calls. Example: [{\"name\": \"k8s_list_pods\", \"arguments\": {}}]")
 
+class InsightSignature(dspy.Signature):
+    """
+    You are an expert Kubernetes and DevOps Analyst.
+    Your goal is to provide a concise, high-intelligence opinion based on tool results.
+    
+    Instructions:
+    1. ANALYZE the raw 'tool_results' in context of the 'user_query'.
+    2. Provide a 2-3 sentence 'expert_opinion' that answers the user's specific question (e.g. comparing environments, identifying risks).
+    3. Be DIRECT and TECHNICAL. Don't use fluff.
+    """
+    user_query: str = dspy.InputField(desc="The user's original question")
+    tool_results: str = dspy.InputField(desc="The data fetched by the tools")
+    
+    expert_opinion: str = dspy.OutputField(desc="A 2-3 sentence insightful summary")
+
 # =============================================
-# DockerAgent Module with Retry
+# DevOpsAgent Module with Retry
 # =============================================
 
-class FastDockerAgent(dspy.Module):
+class FastDevOpsAgent(dspy.Module):
     """Zero-shot agent for high speed."""
     def __init__(self, lm=None):
         super().__init__()
-        self.prog = dspy.Predict(FastDockerSignature)
+        self.prog = dspy.Predict(FastDevOpsSignature)
 
         self.lm = lm
     
-    def forward(self, query: str, tools_schema: List[Dict], history: List[Dict]) -> dspy.Prediction:
+    def forward(self, query: str, tools_schema: List[Dict], history: List[Dict], log_callback=None) -> dspy.Prediction:
         history_str = json.dumps(history, indent=2) if history else "[]"
         tools_str = json.dumps(tools_schema, indent=2)
         
@@ -93,25 +122,49 @@ class FastDockerAgent(dspy.Module):
                 user_query=query
             )
 
-class DockerAgent(dspy.Module):
+class DevOpsAgent(dspy.Module):
     """
     Hybrid Agent:
     1. Tries Fast Zero-Shot approach first (Latency optimized).
     2. Falls back to CoT (Reasoning) if Fast fails validation (Reliability optimized).
     """
-    def __init__(self, max_retries: int = 2, fast_lm=None, smart_lm=None):
+    def __init__(self, max_retries: int = 2, fast_lm=None, smart_lm=None, load_compiled: bool = True):
         super().__init__()
-        self.fast_agent = FastDockerAgent(lm=fast_lm)
-        self.smart_prog = dspy.ChainOfThought(DockerAgentSignature)
+        self.fast_agent = FastDevOpsAgent(lm=fast_lm)
+        self.smart_prog = dspy.ChainOfThought(DevOpsAgentSignature)
         self.smart_lm = smart_lm
         self.max_retries = max_retries
+        
+        if load_compiled:
+             self._try_load_compiled()
+
+    def _try_load_compiled(self):
+        import os
+        path = "devops_agent/compiled_agent.json"
+        # Use absolute path relative to this file for safety
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(current_dir, "compiled_agent.json")
+        
+        if os.path.exists(path):
+            print(f"⚡ [Optimizer] Loading compiled agent from {path}...")
+            try:
+                self.load(path)
+                print("✅ [Optimizer] Compiled agent loaded successfully!")
+            except Exception as e:
+                print(f"⚠️ [Optimizer] Failed to load compiled agent: {e}")
+        else:
+             # This is expected during first run or if optimization hasn't run
+             pass
     
-    def forward(self, query: str, tools_schema: List[Dict], history: List[Dict]) -> dspy.Prediction:
+    def forward(self, query: str, tools_schema: List[Dict], history: List[Dict], log_callback=None) -> dspy.Prediction:
         history_str = json.dumps(history, indent=2) if history else "[]"
         tools_str = json.dumps(tools_schema, indent=2)
         
         # --- ATTEMPT 1: FAST MODE (Zero-Shot) ---
-        print("⚡ [FastAgent] Attempting zero-shot execution...")
+        msg = "⚡ [FastAgent] Attempting zero-shot execution..."
+        print(msg)
+        if log_callback: log_callback("thought", msg)
+
         try:
             # fast_agent already handles context switch
             prediction = self.fast_agent(query=query, tools_schema=tools_schema, history=history)
@@ -122,17 +175,27 @@ class DockerAgent(dspy.Module):
                 is_valid_sem, sem_error = _validate_semantics(validated, tools_schema)
                 if is_valid_sem:
                     prediction._validated_calls = validated
+                    if log_callback: log_callback("thought", "✅ FastAgent validation passed.")
                     return prediction
                 else:
-                    print(f"⚠️ [FastAgent] Semantic Error: {sem_error}. Switching to CoT.")
+                    msg = f"⚠️ [FastAgent] Semantic Error: {sem_error}. Switching to CoT."
+                    print(msg)
+                    if log_callback: log_callback("thought", msg)
             else:
-                print("⚠️ [FastAgent] Invalid JSON. Switching to CoT.")
+                msg = "⚠️ [FastAgent] Invalid JSON. Switching to CoT."
+                print(msg)
+                if log_callback: log_callback("thought", msg)
                 
         except Exception as e:
-            print(f"⚠️ [FastAgent] Error: {e}. Switching to CoT.")
+            msg = f"⚠️ [FastAgent] Error: {e}. Switching to CoT."
+            print(msg)
+            if log_callback: log_callback("thought", msg)
 
         # --- ATTEMPT 2: SMART MODE (Chain-of-Thought with Retries) ---
-        print("🧠 [SmartAgent] Switching to Chain-of-Thought reasoning...")
+        msg = "🧠 [SmartAgent] Switching to Chain-of-Thought reasoning..."
+        print(msg)
+        if log_callback: log_callback("thought", msg)
+        
         last_error = None
         for attempt in range(self.max_retries + 1):
             try:
@@ -197,36 +260,70 @@ def _validate_and_parse(output: str) -> Optional[List[Dict]]:
     
     # Try to extract JSON from prose if needed
     if not cleaned.startswith("[") and not cleaned.startswith("{"):
-        # Look for embedded JSON
-        json_match = re.search(r'\[\s*\{.*?\}\s*\]', cleaned, re.DOTALL)
-        if json_match:
-            cleaned = json_match.group()
+        # Look for embedded JSON - use greedy match and rely on json_repair
+        # Find the start of a JSON array or object
+        array_start = cleaned.find('[')
+        obj_start = cleaned.find('{')
+        
+        if array_start != -1:
+            # Find matching closing bracket using bracket counting
+            bracket_count = 0
+            for i, c in enumerate(cleaned[array_start:], start=array_start):
+                if c == '[': bracket_count += 1
+                elif c == ']': bracket_count -= 1
+                if bracket_count == 0:
+                    cleaned = cleaned[array_start:i+1]
+                    break
+        elif obj_start != -1:
+            # Find matching closing brace
+            brace_count = 0
+            for i, c in enumerate(cleaned[obj_start:], start=obj_start):
+                if c == '{': brace_count += 1
+                elif c == '}': brace_count -= 1
+                if brace_count == 0:
+                    cleaned = f"[{cleaned[obj_start:i+1]}]"
+                    break
         else:
-            # Try single object
-            json_match = re.search(r'\{.*?\}', cleaned, re.DOTALL)
-            if json_match:
-                cleaned = f"[{json_match.group()}]"
-            else:
-                return None
+            return None
     
     try:
         data = json_repair.loads(cleaned)
+        # print(f"[DEBUG] agent.py: Parsed tool_calls: {tool_calls}")
+        
         if isinstance(data, list) and len(data) > 0:
             # Validate structure
+            normalized_list = []
             for item in data:
-                if isinstance(item, dict) and "name" in item:
-                    return _normalize_tool_list(data)
-        elif isinstance(data, dict) and "name" in data:
-            return [_normalize_single(data)]
-    except:
+                if isinstance(item, dict):
+                    # Check for name variants
+                    if "name" in item or "tool_name" in item or "tool" in item:
+                        normalized_list.append(item)
+            
+            if normalized_list:
+                return _normalize_tool_list(normalized_list)
+            else:
+                pass
+                # print(f"[DEBUG] keys found in items: {[list(i.keys()) for i in data if isinstance(i, dict)]}")
+
+        elif isinstance(data, dict):
+             if "name" in data or "tool_name" in data or "tool" in data:
+                return [_normalize_single(data)]
+    except Exception as e:
+        # print(f"[DEBUG] json_repair/validation exception: {e}")
         pass
     
+    # print(f"[DEBUG] _validate_and_parse failed to find valid tools in: {cleaned[:100]}")
     return None
 
 def _normalize_single(item: Dict) -> Dict:
     """Normalize a single tool call dict."""
-    args = item.get("arguments", item.get("parameters", {}))
-    return {"name": item["name"], "arguments": args if args else {}}
+    # Normalize Name
+    name = item.get("name") or item.get("tool_name") or item.get("tool")
+    
+    # Normalize Arguments
+    args = item.get("arguments") or item.get("parameters") or item.get("input") or {}
+    
+    return {"name": name, "arguments": args}
 
 def _normalize_tool_list(data: List) -> List[Dict[str, Any]]:
     """Normalize tool call list to standard format."""
@@ -243,8 +340,9 @@ def _normalize_tool_list(data: List) -> List[Dict[str, Any]]:
     for item in data:
         if isinstance(item, str):
             normalized.append({"name": item, "arguments": {}})
-        elif isinstance(item, dict) and "name" in item:
-            normalized.append(_normalize_single(item))
+        elif isinstance(item, dict):
+             if "name" in item or "tool_name" in item or "tool" in item:
+                normalized.append(_normalize_single(item))
     
     return normalized
 

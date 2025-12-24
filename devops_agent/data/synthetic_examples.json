@@ -1,0 +1,169 @@
+[
+    {
+        "query": "List all pods in the remote cluster",
+        "rationale": "The user explicitly mentions 'remote cluster' and 'list pods'. Therefore, I should select the tool 'remote_k8s_list_pods'.",
+        "tool_calls": [
+            {
+                "name": "remote_k8s_list_pods",
+                "arguments": {}
+            }
+        ]
+    },
+    {
+        "query": "Which node is using the most CPU?",
+        "rationale": "The user is asking for resource usage (CPU) of nodes. I need to find the top nodes by CPU usage. The 'remote_k8s_top_nodes' tool provides this information.",
+        "tool_calls": [
+            {
+                "name": "remote_k8s_top_nodes",
+                "arguments": {}
+            }
+        ]
+    },
+    {
+        "query": "list only the pending pods in the remote cluster",
+        "rationale": "The user wants a list of pods filtered by their phase. I should use 'remote_k8s_list_pods' with the 'status_phase' argument set to 'Pending' for high accuracy and speed.",
+        "tool_calls": [
+            {
+                "name": "remote_k8s_list_pods",
+                "arguments": {
+                    "status_phase": "Pending"
+                }
+            }
+        ]
+    },
+    {
+        "query": "list pods in remote cluster",
+        "rationale": "The user wants to list all pods in the remote cluster. To ensure high performance and avoid context overflow, I should use 'remote_k8s_list_pods' with a 'limit' parameter.",
+        "tool_calls": [
+            {
+                "name": "remote_k8s_list_pods",
+                "arguments": {
+                    "limit": 50
+                }
+            }
+        ]
+    },
+    {
+        "query": "promote deployment web-app from local to remote",
+        "rationale": "The user want to move a local resource to the remote cluster. I should use the 'remote_k8s_promote_resource' tool which handles high-intelligence transformation and production-grade optimizations.",
+        "tool_calls": [
+            {
+                "name": "remote_k8s_promote_resource",
+                "arguments": {
+                    "resource_type": "deployment",
+                    "name": "web-app",
+                    "local_namespace": "default",
+                    "optimize": true
+                }
+            }
+        ]
+    },
+    {
+        "query": "describe all the pods that are paused in my remote k8s",
+        "rationale": "The user wants details on 'paused' pods in the remote cluster. Since 'Paused' is not a standard Kubernetes phase, I will list all pods to identify those in non-Running states (like Pending or Error), then describe them for a 'most intelligent' answer.",
+        "tool_calls": [
+            {
+                "name": "remote_k8s_list_pods",
+                "arguments": {
+                    "limit": 50
+                }
+            }
+        ]
+    },
+    {
+        "query": "Describe the 'auth-db' pod",
+        "rationale": "The user wants to describe a resource but hasn't provided a namespace. I should first use 'remote_k8s_find_resource_namespace' to intelligently locate it across all namespaces before attempting a describe.",
+        "tool_calls": [
+            {
+                "name": "remote_k8s_find_resource_namespace",
+                "arguments": {
+                    "name": "auth-db",
+                    "resource_type": "pods"
+                }
+            }
+        ]
+    },
+    {
+        "query": "Why is my remote web-app pod crashing?",
+        "rationale": "The user is asking for root-cause analysis on a failing pod. I should use 'remote_k8s_trace_dependencies' to check for missing Secrets, ConfigMaps, or PVCs that often cause cascading failures.",
+        "tool_calls": [
+            {
+                "name": "remote_k8s_trace_dependencies",
+                "arguments": {
+                    "pod_name": "web-app",
+                    "namespace": "default"
+                }
+            }
+        ]
+    },
+    {
+        "query": "Is the production web-app same as my local one?",
+        "rationale": "The user is asking for a comparison. I need to fetch data from both local and remote clusters to provide an insightful answer.",
+        "tool_calls": [
+            {
+                "name": "local_k8s_list_pods",
+                "arguments": {}
+            },
+            {
+                "name": "remote_k8s_list_pods",
+                "arguments": {}
+            }
+        ]
+    },
+    {
+        "query": "troubleshoot my production web pod",
+        "rationale": "The user wants to troubleshoot a pod. A great starting point is 'remote_k8s_list_events' to see the timeline of cluster activity related to that pod.",
+        "tool_calls": [
+            {
+                "name": "remote_k8s_list_events",
+                "arguments": {
+                    "pod_name": "web",
+                    "namespace": "default"
+                }
+            }
+        ]
+    },
+    {
+        "query": "what's wrong with the checkout-api?",
+        "rationale": "This is a diagnostic request. First, I'll locate the namespace of the checkout-api resource intelligently, then I'll trace its dependencies.",
+        "tool_calls": [
+            {
+                "name": "remote_k8s_find_resource_namespace",
+                "arguments": {
+                    "name": "checkout-api",
+                    "resource_type": "pods"
+                }
+            }
+        ]
+    },
+    {
+        "query": "Is the remote cluster healthy? I need to know if I can deploy.",
+        "rationale": "The user is checking infrastructure health. I should return NO tool calls and instead use the 'system_status' provided by Pulse in the prompt to answer directly.",
+        "tool_calls": [
+            {
+                "name": "chat",
+                "arguments": {
+                    "message": "Acknowledged. I am checking the Proactive Infrastructure Pulse. Remote K8S is currently CONNECTED and healthy. You are clear for deployment."
+                }
+            }
+        ]
+    },
+    {
+        "query": "What's the difference between my local pods and the ones in production?",
+        "rationale": "This is a comparison query. I should fetch lists from both local and remote MCPs to provide a 'High Intelligence' answer.",
+        "tool_calls": [
+            {
+                "name": "local_k8s_list_pods",
+                "arguments": {
+                    "namespace": "default"
+                }
+            },
+            {
+                "name": "remote_k8s_list_pods",
+                "arguments": {
+                    "namespace": "default"
+                }
+            }
+        ]
+    }
+]

@@ -114,14 +114,21 @@ class DockerStopContainerTool(Tool):
             return {
                 "success": False,
                 "error": f"Container '{args.container_id}' not found. It may have already been stopped or removed.",
+                "raw_error": {"status": 404, "message": "Not Found"},
                 "container_id": args.container_id
             }
             
         except docker.errors.APIError as e:
             # Handle Docker API errors (e.g., permission issues, invalid requests)
+            raw_err = {}
+            if hasattr(e, 'response') and e.response is not None:
+                try: raw_err = e.response.json()
+                except: raw_err = {"message": e.response.text}
+
             return {
                 "success": False,
                 "error": f"Docker API error: {str(e)}",
+                "raw_error": raw_err or {"exception": str(e)},
                 "container_id": args.container_id
             }
             
@@ -130,5 +137,6 @@ class DockerStopContainerTool(Tool):
             return {
                 "success": False,
                 "error": f"Unexpected error: {str(e)}",
+                "raw_error": {"exception": str(e)},
                 "container_id": args.container_id
             }

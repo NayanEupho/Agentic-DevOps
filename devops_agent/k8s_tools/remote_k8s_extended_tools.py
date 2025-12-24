@@ -21,51 +21,50 @@ class RemoteK8sListNamespacesTool(K8sTool):
     def get_parameters_schema(self) -> Dict[str, Any]:
         return {
             "type": "object",
-            "properties": {},
+            "properties": {
+                "label_selector": {
+                    "type": "string",
+                    "description": "Filter namespaces by labels. Use standard Kubernetes label selector syntax."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of namespaces to return. Default is 50."
+                }
+            },
             "required": []
         }
 
-    def run(self, **kwargs) -> Dict[str, Any]:
-        try:
-            url = f"{k8s_config.get_api_url()}/api/v1/namespaces"
-            response = requests.get(
-                url,
-                headers=k8s_config.get_headers(),
-                verify=k8s_config.get_verify_ssl(),
-                timeout=10
-            )
-            response.raise_for_status()
-            data = response.json()
+    def run(self, label_selector: str = None, limit: int = 50, **kwargs) -> Dict[str, Any]:
+        url = f"{k8s_config.get_api_url()}/api/v1/namespaces"
+        
+        params = {}
+        if label_selector: params['labelSelector'] = label_selector
+        if limit: params['limit'] = limit
+        
+        if params:
+            import urllib.parse
+            url += "?" + urllib.parse.urlencode(params)
 
-            namespaces = []
-            for item in data.get('items', []):
-                namespaces.append({
-                    "name": item['metadata']['name'],
-                    "status": item['status']['phase'],
-                    "creation_timestamp": item['metadata']['creationTimestamp']
-                })
+        res = safe_k8s_request("GET", url, k8s_config.get_headers(), k8s_config.get_verify_ssl())
+        if not res["success"]:
+            return res
 
-            return {
-                "success": True,
-                "namespaces": namespaces,
-                "count": len(namespaces)
-            }
-        except requests.exceptions.HTTPError as e:
-            error_data = {"error": str(e)}
-            try:
-                if e.response is not None:
-                    error_data["raw_error"] = e.response.json()
-            except ValueError:
-                pass
-            return {
-                "success": False,
-                **error_data
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
+        data = res["data"]
+        namespaces = []
+        for item in data.get('items', []):
+            metadata = item.get('metadata', {})
+            status = item.get('status', {})
+            namespaces.append({
+                "name": metadata.get('name'),
+                "status": status.get('phase'),
+                "creation_timestamp": metadata.get('creationTimestamp')
+            })
+
+        return {
+            "success": True,
+            "namespaces": namespaces,
+            "count": len(namespaces)
+        }
 
 class RemoteK8sFindPodNamespaceTool(K8sTool):
     name = "remote_k8s_find_pod_namespace"
@@ -85,51 +84,39 @@ class RemoteK8sFindPodNamespaceTool(K8sTool):
         }
 
     def run(self, pod_names: List[str], **kwargs) -> Dict[str, Any]:
-        try:
-            # SANITIZATION: Handle LLM returning string "['a','b']" instead of list
-            if isinstance(pod_names, str):
-                import json
-                try:
-                     # LLM often uses single quotes for lists logic "['a']" which is invalid JSON
-                     cleaned_names = pod_names.replace("'", '"')
-                     pod_names = json.loads(cleaned_names)
-                except json.JSONDecodeError:
-                     return {"success": False, "error": f"Invalid format for pod_names: {pod_names}"}
+        # SANITIZATION: Handle LLM returning string "['a','b']" instead of list
+        if isinstance(pod_names, str):
+            import json
+            try:
+                 # LLM often uses single quotes for lists logic "['a']" which is invalid JSON
+                 cleaned_names = pod_names.replace("'", '"')
+                 pod_names = json.loads(cleaned_names)
+            except json.JSONDecodeError:
+                 return {"success": False, "error": f"Invalid format for pod_names: {pod_names}"}
 
-            # We need to list pods across all namespaces to find matches
-            url = f"{k8s_config.get_api_url()}/api/v1/pods"
-            response = requests.get(
-                url,
-                headers=k8s_config.get_headers(),
-                verify=k8s_config.get_verify_ssl(),
-                timeout=10
-            )
-            response.raise_for_status()
-            data = response.json()
+        # We need to list pods across all namespaces to find matches
+        url = f"{k8s_config.get_api_url()}/api/v1/pods"
+        # Note: safe_k8s_request doesn't take params yet, I'll update it or append to url
+        if "?" in url: url += "&limit=500"
+        else: url += "?limit=500"
+        res = safe_k8s_request("GET", url, k8s_config.get_headers(), k8s_config.get_verify_ssl())
 
-            results = {}
-            all_pods = data.get('items', [])
-            
-            for target_pod in pod_names:
-                found_namespaces = []
-                for pod in all_pods:
-                    if pod['metadata']['name'] == target_pod:
-                        found_namespaces.append(pod['metadata']['namespace'])
-                
-                if found_namespaces:
-                    results[target_pod] = found_namespaces
-                else:
-                    results[target_pod] = "Not Found"
+        if not res["success"]:
+            return res
 
-            return {
-                "success": True,
-                "pod_locations": results
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
+        data = res["data"]
+        results = {}
+        for pod_name in pod_names:
+            results[pod_name] = "Not Found"
+            for item in data.get('items', []):
+                if item.get('metadata', {}).get('name') == pod_name:
+                    results[pod_name] = item.get('metadata', {}).get('namespace')
+                    break
+        
+        return {
+            "success": True,
+            "pod_namespaces": results
+        }
 
 class RemoteK8sGetResourcesIPsTool(K8sTool):
     name = "remote_k8s_get_resources_ips"
@@ -188,14 +175,10 @@ class RemoteK8sGetResourcesIPsTool(K8sTool):
             else:
                 names = [] # Handle None case
 
-            response = requests.get(
-                url,
-                headers=k8s_config.get_headers(),
-                verify=k8s_config.get_verify_ssl(),
-                timeout=10
-            )
-            response.raise_for_status()
-            data = response.json()
+            res = safe_k8s_request("GET", url, k8s_config.get_headers(), k8s_config.get_verify_ssl())
+            if not res["success"]:
+                return res
+            data = res["data"]
             items = data.get('items', [])
             
             # If names is empty (or meant to be all), we populate it with all names found
@@ -266,12 +249,20 @@ class RemoteK8sListDeploymentsTool(K8sTool):
                 "namespace": {
                     "type": "string",
                     "description": "Namespace to list deployments from. If omitted, lists from all namespaces."
+                },
+                "label_selector": {
+                    "type": "string",
+                    "description": "Filter deployments by labels. Use standard Kubernetes label selector syntax."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of deployments to return. Default is 50."
                 }
             },
             "required": []
         }
 
-    def run(self, namespace: str = None, **kwargs) -> Dict[str, Any]:
+    def run(self, namespace: str = None, label_selector: str = None, limit: int = 50, **kwargs) -> Dict[str, Any]:
         """
         Execute the tool to list deployments.
 
@@ -291,20 +282,22 @@ class RemoteK8sListDeploymentsTool(K8sTool):
             else:
                 url = f"{k8s_config.get_api_url()}/apis/apps/v1/deployments"
 
+            # Prepare query parameters
+            params = {}
+            if label_selector:
+                params['labelSelector'] = label_selector
+            if limit:
+                params['limit'] = limit
+
             # Make the HTTP GET request to the Remote Kubernetes API
             # We use the configuration from k8s_config to get headers (auth token) and SSL verification settings
-            response = requests.get(
-                url,
-                headers=k8s_config.get_headers(),
-                verify=k8s_config.get_verify_ssl(),
-                timeout=10
-            )
+            res = safe_k8s_request("GET", url, k8s_config.get_headers(), k8s_config.get_verify_ssl(), params=params)
             
-            # Check for HTTP errors (e.g., 401 Unauthorized, 404 Not Found)
-            response.raise_for_status()
+            if not res["success"]:
+                return res
             
             # Parse the JSON response from Kubernetes
-            data = response.json()
+            data = res["data"]
 
             deployments = []
             # Iterate through the 'items' list in the response, which contains the Deployment objects
@@ -393,18 +386,13 @@ class RemoteK8sDescribeDeploymentTool(K8sTool):
             url = f"{k8s_config.get_api_url()}/apis/apps/v1/namespaces/{safe_namespace}/deployments/{safe_name}"
             
             # Make the HTTP GET request
-            response = requests.get(
-                url,
-                headers=k8s_config.get_headers(),
-                verify=k8s_config.get_verify_ssl(),
-                timeout=10
-            )
+            res = safe_k8s_request("GET", url, k8s_config.get_headers(), k8s_config.get_verify_ssl())
             
-            # Check for errors (e.g., 404 if deployment doesn't exist)
-            response.raise_for_status()
+            if not res["success"]:
+                return res
             
             # Parse the JSON response
-            data = response.json()
+            data = res["data"]
 
             # Extract essential details from the Kubernetes resource object
             metadata = data.get('metadata', {})
@@ -442,19 +430,8 @@ class RemoteK8sDescribeDeploymentTool(K8sTool):
                 "success": True,
                 "deployment": details
             }
-        except requests.exceptions.HTTPError as e:
-            error_data = {"error": str(e)}
-            try:
-                if e.response is not None:
-                    error_data["raw_error"] = e.response.json()
-            except ValueError:
-                pass
-            return {
-                "success": False,
-                **error_data
-            }
         except Exception as e:
-            # Handle exceptions
+            # Handle any exceptions (network errors, API errors, parsing errors)
             return {
                 "success": False,
                 "error": str(e)
@@ -489,112 +466,88 @@ class RemoteK8sDescribeNodeTool(K8sTool):
         }
 
     def run(self, node_name: str, **kwargs) -> Dict[str, Any]:
-        """
-        Execute the tool to describe a node.
+        from .k8s_utils import safe_k8s_request
+        safe_name = quote(node_name)
+        url = f"{k8s_config.get_api_url()}/api/v1/nodes/{safe_name}"
+        
+        res = safe_k8s_request("GET", url, k8s_config.get_headers(), k8s_config.get_verify_ssl())
+        if not res["success"]:
+            return res
 
-        Args:
-            node_name (str): The name of the node.
-            **kwargs: Additional arguments (unused).
+        data = res["data"]
+        metadata = data.get('metadata', {})
+        status = data.get('status', {})
+        spec = data.get('spec', {})
 
-        Returns:
-            Dict[str, Any]: A dictionary containing success status and detailed node info.
-        """
-        try:
-            # Construct the API URL for the specific node resource
-            # Endpoint: /api/v1/nodes/{node_name}
-            safe_name = quote(node_name)
-            url = f"{k8s_config.get_api_url()}/api/v1/nodes/{safe_name}"
-            
-            # Make the HTTP GET request
-            response = requests.get(
-                url,
-                headers=k8s_config.get_headers(),
-                verify=k8s_config.get_verify_ssl(),
-                timeout=10
-            )
-            
-            # Check for errors (e.g., 404 if node doesn't exist)
-            response.raise_for_status()
-            
-            # Parse the JSON response
-            data = response.json()
+        details = {
+            "name": metadata.get('name'),
+            "labels": metadata.get('labels', {}),
+            "annotations": metadata.get('annotations', {}),
+            "creation_timestamp": metadata.get('creationTimestamp'),
+            "status": {
+                "conditions": status.get('conditions', []),
+                "addresses": status.get('addresses', []),
+                "capacity": status.get('capacity', {}),
+                "allocatable": status.get('allocatable', {}),
+                "node_info": status.get('nodeInfo', {})
+            },
+            "spec": {
+                "pod_cidr": spec.get('podCIDR'),
+                "unschedulable": spec.get('unschedulable', False),
+                "taints": spec.get('taints', [])
+            }
+        }
 
-            # Extract essential details from the Kubernetes Node object
-            metadata = data.get('metadata', {})
-            spec = data.get('spec', {})
-            status = data.get('status', {})
-            
-            # Extract addresses (InternalIP, ExternalIP, Hostname)
-            addresses = {}
-            for addr in status.get('addresses', []):
-                addresses[addr.get('type')] = addr.get('address')
-            
-            # Extract capacity and allocatable resources
-            capacity = status.get('capacity', {})
-            allocatable = status.get('allocatable', {})
-            
-            # Extract conditions (Ready, DiskPressure, MemoryPressure, etc.)
-            conditions = []
-            for cond in status.get('conditions', []):
-                conditions.append({
-                    "type": cond.get('type'),
-                    "status": cond.get('status'),
-                    "reason": cond.get('reason'),
-                    "message": cond.get('message', '')[:100]  # Truncate long messages
-                })
-            
-            # Extract node info (OS, kernel, container runtime)
-            node_info = status.get('nodeInfo', {})
-            
-            # Construct comprehensive details dictionary
-            details = {
+        return {
+            "success": True,
+            "node": details
+        }
+
+class RemoteK8sListPodsOnNodeTool(K8sTool):
+    """
+    Tool to list pods running on a specific node in a remote Kubernetes cluster.
+    """
+    name = "remote_k8s_list_pods_on_node"
+    description = "List all pods running on a specific node in the REMOTE Kubernetes cluster."
+
+    def get_parameters_schema(self) -> Dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "node_name": {
+                    "type": "string",
+                    "description": "REQUIRED: The name of the node to list pods from."
+                }
+            },
+            "required": ["node_name"]
+        }
+
+    def run(self, node_name: str, **kwargs) -> Dict[str, Any]:
+        from .k8s_utils import safe_k8s_request
+        url = f"{k8s_config.get_api_url()}/api/v1/pods"
+        res = safe_k8s_request("GET", url, k8s_config.get_headers(), k8s_config.get_verify_ssl(), params={"fieldSelector": f"spec.nodeName={node_name}"})
+        
+        if not res["success"]:
+            return res
+
+        data = res["data"]
+        pods = []
+        for item in data.get('items', []):
+            metadata = item.get('metadata', {})
+            status = item.get('status', {})
+            pods.append({
                 "name": metadata.get('name'),
-                "labels": metadata.get('labels', {}),
-                "creation_timestamp": metadata.get('creationTimestamp'),
-                "addresses": addresses,
-                "capacity": {
-                    "cpu": capacity.get('cpu'),
-                    "memory": capacity.get('memory'),
-                    "pods": capacity.get('pods')
-                },
-                "allocatable": {
-                    "cpu": allocatable.get('cpu'),
-                    "memory": allocatable.get('memory'),
-                    "pods": allocatable.get('pods')
-                },
-                "conditions": conditions,
-                "system_info": {
-                    "os_image": node_info.get('osImage'),
-                    "kernel_version": node_info.get('kernelVersion'),
-                    "container_runtime": node_info.get('containerRuntimeVersion'),
-                    "kubelet_version": node_info.get('kubeletVersion'),
-                    "architecture": node_info.get('architecture')
-                },
-                "taints": spec.get('taints', []),
-                "unschedulable": spec.get('unschedulable', False)
-            }
+                "namespace": metadata.get('namespace'),
+                "status": status.get('phase'),
+                "pod_ip": status.get('podIP')
+            })
 
-            return {
-                "success": True,
-                "node": details
-            }
-        except requests.exceptions.HTTPError as e:
-            error_data = {"error": str(e)}
-            try:
-                if e.response is not None:
-                    error_data["raw_error"] = e.response.json()
-            except ValueError:
-                pass
-            return {
-                "success": False,
-                **error_data
-            }
-        except Exception as e:
-            # Handle exceptions
-            return {
-                "success": False,
-                "error": str(e)
-            }
+        return {
+            "success": True,
+            "node_name": node_name,
+            "pods": pods,
+            "count": len(pods)
+        }
 
 
 class RemoteK8sDescribePodTool(K8sTool):
@@ -627,28 +580,19 @@ class RemoteK8sDescribePodTool(K8sTool):
             
             # 1. Get Pod Details
             url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_ns}/pods/{safe_name}"
-            response = requests.get(
-                url,
-                headers=k8s_config.get_headers(),
-                verify=k8s_config.get_verify_ssl(),
-                timeout=10
-            )
-            response.raise_for_status()
-            pod_data = response.json()
+            res = safe_k8s_request("GET", url, k8s_config.get_headers(), k8s_config.get_verify_ssl())
+            if not res["success"]:
+                return res
+            pod_data = res["data"]
 
             # 2. Get Pod Events (for a true 'describe' feel)
             # Events are usually filtered by involvedObject using fieldSelector
             events_url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_ns}/events?fieldSelector=involvedObject.name={safe_name},involvedObject.namespace={safe_ns},involvedObject.uid={pod_data['metadata']['uid']}"
             
-            events_resp = requests.get(
-                events_url,
-                headers=k8s_config.get_headers(),
-                verify=k8s_config.get_verify_ssl(),
-                timeout=10
-            )
+            events_res = safe_k8s_request("GET", events_url, k8s_config.get_headers(), k8s_config.get_verify_ssl())
             events = []
-            if events_resp.ok:
-                for e in events_resp.json().get('items', []):
+            if events_res["success"]:
+                for e in events_res["data"].get('items', []):
                     events.append({
                         "type": e.get('type'),
                         "reason": e.get('reason'),
@@ -728,42 +672,25 @@ class RemoteK8sDescribeNamespaceTool(K8sTool):
         }
 
     def run(self, namespace_name: str, **kwargs) -> Dict[str, Any]:
-        try:
-            safe_name = quote(namespace_name)
-            url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_name}"
-            
-            response = requests.get(
-                url,
-                headers=k8s_config.get_headers(),
-                verify=k8s_config.get_verify_ssl(),
-                timeout=10
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            metadata = data.get('metadata', {})
-            status = data.get('status', {})
+        from .k8s_utils import safe_k8s_request
+        safe_name = quote(namespace_name)
+        url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_name}"
+        
+        res = safe_k8s_request("GET", url, k8s_config.get_headers(), k8s_config.get_verify_ssl())
+        if not res["success"]:
+            return res
 
-            return {
-                "success": True,
-                "namespace": {
-                    "name": metadata.get('name'),
-                    "status": status.get('phase'),
-                    "creation_timestamp": metadata.get('creationTimestamp'),
-                    "labels": metadata.get('labels', {}),
-                    "annotations": metadata.get('annotations', {})
-                }
+        data = res["data"]
+        metadata = data.get('metadata', {})
+        status = data.get('status', {})
+
+        return {
+            "success": True,
+            "namespace": {
+                "name": metadata.get('name'),
+                "status": status.get('phase'),
+                "creation_timestamp": metadata.get('creationTimestamp'),
+                "labels": metadata.get('labels', {}),
+                "annotations": metadata.get('annotations', {})
             }
-        except requests.exceptions.HTTPError as e:
-            error_data = {"error": str(e)}
-            try:
-                if e.response is not None:
-                    error_data["raw_error"] = e.response.json()
-            except ValueError:
-                pass
-            return {
-                "success": False,
-                **error_data
-            }
-        except Exception as e:
-             return {"success": False, "error": str(e)}
+        }

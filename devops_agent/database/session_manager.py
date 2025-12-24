@@ -12,6 +12,7 @@ class Message(BaseModel):
     role: str
     content: str
     timestamp: str = Field(default_factory=lambda: datetime.now().isoformat())
+    thoughts: Optional[List[Dict[str, str]]] = None  # For UI thinking toggle
 
 class Session(BaseModel):
     id: str
@@ -112,10 +113,13 @@ class SessionManager:
             except Exception as e:
                 print(f"⚠️  Error clearing active session: {e}")
 
-    def add_message(self, session_id: str, role: str, content: str):
-        """Add a message via DB."""
-        # Just delegate to DB
-        db.add_message(session_id, role, content)
+    def add_message(self, session_id: str, role: str, content: str) -> Optional[int]:
+        """Add a message via DB. Returns message_id for linking thoughts."""
+        return db.add_message(session_id, role, content)
+
+    def add_thoughts(self, message_id: int, thoughts: List[Dict[str, Any]]):
+        """Add thoughts for a message."""
+        db.add_thoughts(message_id, thoughts)
 
     def list_sessions(self) -> List[Session]:
         """List all sessions sorted by date via DB."""

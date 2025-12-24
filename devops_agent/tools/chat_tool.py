@@ -26,10 +26,11 @@ class ChatTool(Tool):
 
     def run(self, **kwargs) -> Dict[str, Any]:
         # Support both direct kwargs and wrapped 'arguments' dict if internal logic differs
-        message = kwargs.get("message")
+        message = kwargs.get("message") or kwargs.get("text")
         if not message and "arguments" in kwargs:
              # Fallback if incorrectly called with nested dict
-             message = kwargs["arguments"].get("message", "")
+             args = kwargs["arguments"]
+             message = args.get("message") or args.get("text", "")
              
         if not message:
             message = ""

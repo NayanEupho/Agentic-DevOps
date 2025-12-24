@@ -37,151 +37,72 @@ class LocalK8sListNodesTool(K8sTool):
         return {
             # This is a JSON Schema object definition
             "type": "object",
-            # No properties - this tool doesn't accept any parameters
-            "properties": {},
+            # Properties that the tool accepts
+            "properties": {
+                "label_selector": {
+                    "type": "string",
+                    "description": "Filter nodes by labels (e.g., 'node-role.kubernetes.io/worker='). Use standard Kubernetes label selector syntax."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of nodes to return. Default is 50."
+                }
+            },
             # List of required parameters (empty)
             "required": []
         }
 
-    def run(self, **kwargs) -> Dict[str, Any]:
-        """
-        Execute the actual Kubernetes command to list nodes.
-        
-        This method makes an HTTP GET request to the Kubernetes API
-        to retrieve node information, then formats the result.
-        
-        Args:
-            **kwargs: No parameters expected, but accepts kwargs for consistency
-        
-        Returns:
-            dict: A structured result containing either:
-                  - success: True, nodes: [list of node info], count: number of nodes
-                  - success: False, error: [error message]
-        """
+    def run(self, label_selector: str = None, limit: int = 50, **kwargs) -> Dict[str, Any]:
+        from .k8s_utils import safe_k8s_request
         api_url = k8s_config.get_api_url()
         headers = k8s_config.get_headers()
         verify_ssl = k8s_config.get_verify_ssl()
 
-        try:
-            # API endpoint for listing all nodes
-            url = f"{api_url}/api/v1/nodes"
-            
-            # Make the HTTP GET request to the Kubernetes API
-            # We disable SSL warning if verify is False
-            if not verify_ssl:
-                requests.packages.urllib3.disable_warnings(requests.packages.urllib3.exceptions.InsecureRequestWarning)
+        url = f"{api_url}/api/v1/nodes"
+        params = {}
+        if label_selector: params['labelSelector'] = label_selector
+        if limit: params['limit'] = limit
 
-            response = requests.get(url, headers=headers, verify=verify_ssl, timeout=10)
+        res = safe_k8s_request("GET", url, headers, verify_ssl, params=params)
+        
+        if not res["success"]:
+            return res
+
+        data = res["data"]
+        nodes_list = data.get("items", [])
+        formatted_nodes = []
+        
+        for node in nodes_list:
+            metadata = node.get("metadata", {})
+            status = node.get("status", {})
+            spec = node.get("spec", {})
             
-            # Check if the request was successful
-            response.raise_for_status()
+            conditions = status.get("conditions", [])
+            ready_condition = next((c for c in conditions if c.get("type") == "Ready"), {})
+            is_ready = ready_condition.get("status") == "True"
             
-            # Parse the JSON response
-            data = response.json()
+            roles = self._get_node_roles(metadata.get("labels", {}))
+            addresses = status.get("addresses", [])
+            internal_ip = next((addr.get("address") for addr in addresses if addr.get("type") == "InternalIP"), "N/A")
+            hostname = next((addr.get("address") for addr in addresses if addr.get("type") == "Hostname"), "N/A")
             
-            # Extract nodes from the response
-            nodes_list = data.get("items", [])
-            
-            # Format the node information into a list of dictionaries
-            # Each dictionary contains essential information about a node
-            formatted_nodes = []
-            for node in nodes_list:
-                # Extract metadata and status information
-                metadata = node.get("metadata", {})
-                status = node.get("status", {})
-                spec = node.get("spec", {})
-                
-                # Get node conditions to determine readiness
-                conditions = status.get("conditions", [])
-                ready_condition = next(
-                    (c for c in conditions if c.get("type") == "Ready"),
-                    {}
-                )
-                is_ready = ready_condition.get("status") == "True"
-                
-                # Get node roles from labels
-                labels = metadata.get("labels", {})
-                roles = self._get_node_roles(labels)
-                
-                # Get node addresses
-                addresses = status.get("addresses", [])
-                internal_ip = next(
-                    (addr.get("address") for addr in addresses if addr.get("type") == "InternalIP"),
-                    "N/A"
-                )
-                hostname = next(
-                    (addr.get("address") for addr in addresses if addr.get("type") == "Hostname"),
-                    "N/A"
-                )
-                
-                # Get node capacity and allocatable resources
-                capacity = status.get("capacity", {})
-                allocatable = status.get("allocatable", {})
-                
-                # Create a dictionary with node information
-                node_info = {
-                    # Node name
-                    "name": metadata.get("name", "unknown"),
-                    # Node status (Ready/NotReady)
-                    "status": "Ready" if is_ready else "NotReady",
-                    # Node roles (e.g., "control-plane,master" or "worker")
-                    "roles": roles,
-                    # Internal IP address
-                    "internal_ip": internal_ip,
-                    # Hostname
-                    "hostname": hostname,
-                    # Kubernetes version running on the node
-                    "kubelet_version": status.get("nodeInfo", {}).get("kubeletVersion", "unknown"),
-                    # CPU capacity
-                    "cpu": capacity.get("cpu", "N/A"),
-                    # Memory capacity
-                    "memory": capacity.get("memory", "N/A"),
-                    # OS information
-                    "os": status.get("nodeInfo", {}).get("osImage", "unknown"),
-                }
-                
-                # Add this node's info to our list
-                formatted_nodes.append(node_info)
-            
-            # Return successful result with the list of nodes
-            return {
-                "success": True,
-                "nodes": formatted_nodes,
-                "count": len(formatted_nodes)
-            }
-            
-        except requests.exceptions.ConnectionError:
-            # Handle the case where the API is not reachable
-            return {
-                "success": False,
-                "error": f"Cannot connect to Kubernetes API at {api_url}. "
-                        "Check your network connection and configuration.",
-                "nodes": []
-            }
-            
-        except requests.exceptions.Timeout:
-            # Handle request timeout
-            return {
-                "success": False,
-                "error": "Request to Kubernetes API timed out after 10 seconds",
-                "nodes": []
-            }
-            
-        except requests.exceptions.HTTPError as e:
-            # Handle HTTP errors (404, 403, etc.)
-            return {
-                "success": False,
-                "error": f"Kubernetes API returned error: {e.response.status_code} - {e.response.reason}",
-                "nodes": []
-            }
-            
-        except Exception as e:
-            # If anything else goes wrong, catch the exception and return an error
-            return {
-                "success": False,
-                "error": f"Unexpected error: {str(e)}",
-                "nodes": []
-            }
+            formatted_nodes.append({
+                "name": metadata.get("name", "unknown"),
+                "status": "Ready" if is_ready else "NotReady",
+                "roles": roles,
+                "internal_ip": internal_ip,
+                "hostname": hostname,
+                "kubelet_version": status.get("nodeInfo", {}).get("kubeletVersion", "unknown"),
+                "cpu": status.get("capacity", {}).get("cpu", "N/A"),
+                "memory": status.get("capacity", {}).get("memory", "N/A"),
+                "os": status.get("nodeInfo", {}).get("osImage", "unknown"),
+            })
+        
+        return {
+            "success": True,
+            "nodes": formatted_nodes,
+            "count": len(formatted_nodes)
+        }
     
     def _get_node_roles(self, labels: Dict[str, Any]) -> str:
         """

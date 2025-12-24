@@ -1,0 +1,157 @@
+{
+  "fast_agent.prog": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "query": "list pods in remote cluster",
+        "tool_calls": [
+          {
+            "name": "remote_k8s_list_pods",
+            "arguments": {
+              "limit": 50
+            }
+          }
+        ],
+        "rationale": "The user wants to list all pods in the remote cluster. To ensure high performance and avoid context overflow, I should use 'remote_k8s_list_pods' with a 'limit' parameter."
+      },
+      {
+        "query": "List all pods in the remote cluster",
+        "tool_calls": [
+          {
+            "name": "remote_k8s_list_pods",
+            "arguments": {}
+          }
+        ],
+        "rationale": "The user explicitly mentions 'remote cluster' and 'list pods'. Therefore, I should select the tool 'remote_k8s_list_pods'."
+      },
+      {
+        "query": "list only the pending pods in the remote cluster",
+        "tool_calls": [
+          {
+            "name": "remote_k8s_list_pods",
+            "arguments": {
+              "status_phase": "Pending"
+            }
+          }
+        ],
+        "rationale": "The user wants a list of pods filtered by their phase. I should use 'remote_k8s_list_pods' with the 'status_phase' argument set to 'Pending' for high accuracy and speed."
+      },
+      {
+        "query": "Which node is using the most CPU?",
+        "tool_calls": [
+          {
+            "name": "remote_k8s_top_nodes",
+            "arguments": {}
+          }
+        ],
+        "rationale": "The user is asking for resource usage (CPU) of nodes. I need to find the top nodes by CPU usage. The 'remote_k8s_top_nodes' tool provides this information."
+      }
+    ],
+    "signature": {
+      "instructions": "You are a high-performance JSON API.\nInput: user_query, history_context, available_tools\nOutput: JSON List of tool calls.\n\nConstraints:\n1. OUTPUT ONLY JSON. No thinking, no reasoning, no markdown, no specific comments.\n2. Format: [{\"name\": \"tool_name\", \"arguments\": {\"arg\": \"val\"}}]\n3. Do NOT use \"tool_name\" or \"input\" as keys. Use \"name\" and \"arguments\".",
+      "fields": [
+        {
+          "prefix": "History Context:",
+          "description": "JSON list of previous messages"
+        },
+        {
+          "prefix": "Available Tools:",
+          "description": "JSON schema of tools"
+        },
+        {
+          "prefix": "User Query:",
+          "description": "User command"
+        },
+        {
+          "prefix": "Tool Calls:",
+          "description": "JSON list"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "smart_prog.predict": {
+    "traces": [],
+    "train": [],
+    "demos": [
+      {
+        "query": "Which node is using the most CPU?",
+        "tool_calls": [
+          {
+            "name": "remote_k8s_top_nodes",
+            "arguments": {}
+          }
+        ],
+        "rationale": "The user is asking for resource usage (CPU) of nodes. I need to find the top nodes by CPU usage. The 'remote_k8s_top_nodes' tool provides this information."
+      },
+      {
+        "query": "List all pods in the remote cluster",
+        "tool_calls": [
+          {
+            "name": "remote_k8s_list_pods",
+            "arguments": {}
+          }
+        ],
+        "rationale": "The user explicitly mentions 'remote cluster' and 'list pods'. Therefore, I should select the tool 'remote_k8s_list_pods'."
+      },
+      {
+        "query": "list only the pending pods in the remote cluster",
+        "tool_calls": [
+          {
+            "name": "remote_k8s_list_pods",
+            "arguments": {
+              "status_phase": "Pending"
+            }
+          }
+        ],
+        "rationale": "The user wants a list of pods filtered by their phase. I should use 'remote_k8s_list_pods' with the 'status_phase' argument set to 'Pending' for high accuracy and speed."
+      },
+      {
+        "query": "list pods in remote cluster",
+        "tool_calls": [
+          {
+            "name": "remote_k8s_list_pods",
+            "arguments": {
+              "limit": 50
+            }
+          }
+        ],
+        "rationale": "The user wants to list all pods in the remote cluster. To ensure high performance and avoid context overflow, I should use 'remote_k8s_list_pods' with a 'limit' parameter."
+      }
+    ],
+    "signature": {
+      "instructions": "You are an intelligent Docker and Kubernetes Assistant.\nYour goal is to map the user's natural language query to tool calls.\n\nInstructions:\n1. ANALYZE the 'history_context' and 'user_query'.\n2. THINK step-by-step about which tool matches the user's intent. \n3. CHECK 'available_tools' to ensure the tool exists and arguments are correct.\n4. IF the user is just saying \"hi\", asking a general question, or not requesting a specific action, USE the 'chat' tool.\n5. OUTPUT a \"Thought\" explaining your reasoning.\n6. OUTPUT the \"tool_calls\" as a JSON list.\n\nRICH CONTEXT:\n- If `System Context` is provided in the query, use it to resolve names (e.g. \"restart web\" -> \"restart web-container-123\").\n\nOUTPUT FORMAT:\n- Reasoning: [Your thought process]\n- tool_calls: [{\"name\": \"tool_name\", \"arguments\": {...}}]",
+      "fields": [
+        {
+          "prefix": "History Context:",
+          "description": "Previous conversation history"
+        },
+        {
+          "prefix": "Available Tools:",
+          "description": "JSON schema of available tools"
+        },
+        {
+          "prefix": "User Query:",
+          "description": "The user's natural language command"
+        },
+        {
+          "prefix": "Reasoning: Let's think step by step in order to",
+          "description": "${reasoning}"
+        },
+        {
+          "prefix": "Tool Calls:",
+          "description": "JSON list of tool calls. Example: [{\"name\": \"k8s_list_pods\", \"arguments\": {}}]"
+        }
+      ]
+    },
+    "lm": null
+  },
+  "metadata": {
+    "dependency_versions": {
+      "python": "3.13",
+      "dspy": "3.0.4",
+      "cloudpickle": "3.1"
+    }
+  }
+}

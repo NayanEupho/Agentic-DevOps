@@ -196,12 +196,29 @@ class DockerRunContainerTool(Tool):
                 "message": f"Container {container.name} started successfully with image {args.image}."
             }
             
+        except docker.errors.APIError as e:
+            # Propagate raw error for AI Analyzer
+            raw_err = {}
+            if hasattr(e, 'response') and e.response is not None:
+                try:
+                    raw_err = e.response.json()
+                except:
+                    raw_err = {"message": e.response.text}
+            
+            return {
+                "success": False,
+                "error": f"Docker API Error: {str(e)}",
+                "raw_error": raw_err or {"exception": str(e)},
+                "container_id": None,
+                "name": None
+            }
         except Exception as e:
             # If anything goes wrong, catch the exception and return an error
             # This ensures the tool always returns a structured response
             return {
                 "success": False,
                 "error": str(e),  # Convert exception to string for LLM
+                "raw_error": {"exception": str(e)},
                 "container_id": None,  # No container ID on error
                 "name": None         # No container name on error
             }

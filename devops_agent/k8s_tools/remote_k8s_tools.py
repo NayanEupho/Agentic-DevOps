@@ -25,11 +25,27 @@ from .remote_k8s_service_tools import (
     RemoteK8sGetServiceTool,
     RemoteK8sDescribeServiceTool
 )
+from .remote_k8s_debug_tools import (
+    RemoteK8sGetLogsTool,
+    RemoteK8sListEventsTool
+)
+from .remote_k8s_metrics_tools import (
+    RemoteK8sTopNodesTool,
+    RemoteK8sTopPodsTool
+)
+from .remote_k8s_exec_tools import RemoteK8sExecTool
+from .remote_k8s_promote_tool import RemoteK8sPromoteResourceTool
+from .remote_k8s_discovery_tools import (
+    RemoteK8sFindResourceNamespaceTool,
+    RemoteK8sTraceDependenciesTool,
+    RemoteK8sDiffResourcesTool,
+    RemoteK8sAnalyzeUtilizationTool
+)
 
 # We create subclasses to override the name and description
 class RemoteK8sListPodsTool(LocalK8sListPodsTool):
     name = "remote_k8s_list_pods"
-    description = "List Kubernetes pods in the REMOTE cluster. Can filter by namespace or by node name (e.g., node_name='kc-m1')."
+    description = "List Kubernetes pods in the REMOTE cluster. Use status_phase (enum) for lightning-fast filtering by pod state (Running, Pending, etc.). Can also filter by node_name."
 
 class RemoteK8sListNodesTool(LocalK8sListNodesTool):
     name = "remote_k8s_list_nodes"
@@ -50,6 +66,16 @@ ALL_REMOTE_K8S_TOOLS: List[K8sTool] = [
     RemoteK8sListServicesTool(),
     RemoteK8sGetServiceTool(),
     RemoteK8sDescribeServiceTool(),
+    RemoteK8sGetLogsTool(),
+    RemoteK8sListEventsTool(),
+    RemoteK8sTopNodesTool(),
+    RemoteK8sTopPodsTool(),
+    RemoteK8sExecTool(),
+    RemoteK8sPromoteResourceTool(),
+    RemoteK8sFindResourceNamespaceTool(),
+    RemoteK8sTraceDependenciesTool(),
+    RemoteK8sDiffResourcesTool(),
+    RemoteK8sAnalyzeUtilizationTool()
 ]
 
 def get_remote_k8s_tools_schema() -> List[dict]:

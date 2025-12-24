@@ -299,17 +299,10 @@ def run_command(
     """
     Execute a Docker command using natural language.
     """
-    # Import safety module to potentially modify confirmation behavior
-    from .safety import USE_DETAILED_CONFIRMATION
-    
-    # Handle the --no-confirm flag
+    # [PHASE 6] Safety confirmation is now handled by the Agent's return value inside cli_helper
+    # We pass the no_confirm flag down to process_command_turn.
     if no_confirm:
-        # Temporarily disable detailed confirmation for this run
-        import devops_agent.safety as safety_module
-        original_detailed = safety_module.USE_DETAILED_CONFIRMATION
-        safety_module.USE_DETAILED_CONFIRMATION = False
-        print("⚠️  Safety confirmation disabled with --no-confirm flag")
-    
+        print("⚠️  Safety confirmation checks will be bypassed where possible.")
     
     if verbose:
         print(f"🔍 Processing query: '{query}'")
@@ -372,7 +365,7 @@ def run_command(
         raise typer.Exit(code=1)
 
 @app.command(name="server")
-def start_server(host: str = "127.0.0.1", port: int = 8080):
+def start_server(host: str = "0.0.0.0", port: int = 8080):
     """Start the MCP (Model Context Protocol) server."""
     typer.echo("🚀 Starting MCP Server...")
     try:
@@ -384,7 +377,7 @@ def start_server(host: str = "127.0.0.1", port: int = 8080):
         raise typer.Exit(code=1)
 
 @app.command(name="k8s-server")
-def start_k8s_server(host: str = "127.0.0.1", port: int = 8081):
+def start_k8s_server(host: str = "0.0.0.0", port: int = 8081):
     """Start the Kubernetes MCP server."""
     typer.echo("🚀 Starting Kubernetes MCP Server...")
     try:
@@ -396,7 +389,7 @@ def start_k8s_server(host: str = "127.0.0.1", port: int = 8081):
         raise typer.Exit(code=1)
 
 @app.command(name="remote-k8s-server")
-def start_remote_k8s_server_cmd(host: str = "127.0.0.1", port: int = 8082):
+def start_remote_k8s_server_cmd(host: str = "0.0.0.0", port: int = 8082):
     """Start the Remote Kubernetes MCP server."""
     from .mcp.remote_k8s_server import start_remote_k8s_mcp_server
     typer.echo("🚀 Starting Remote Kubernetes MCP Server...")
@@ -548,16 +541,51 @@ def start_all_servers():
         update_env_file("DEVOPS_LLM_FAST_MODEL", "")
 
     # ---------------------------------------------------------
-    # 3. SUMMARY
+    # 3. EMBEDDING MODEL CONFIGURATION (for RAG/Semantic Search)
+    # ---------------------------------------------------------
+    typer.echo(f"\n🔍 Embedding Model Configuration (for RAG & Semantic Search)")
+    typer.echo("   Embedding models are lightweight and optimized for vector generation.")
+    typer.echo("   Running locally is HIGHLY recommended for speed (~20ms vs ~1000ms).")
+    
+    # Default to local
+    emb_host = "http://localhost:11434"
+    emb_model = "nomic-embed-text"
+    
+    if typer.confirm("   Configure Embedding Model? (Recommended: local nomic-embed-text)", default=True):
+        e_host, e_model = select_provider_flow("🔍 Embedding Model Setup", default_host="http://localhost:11434")
+        if e_host and e_model:
+            emb_host = e_host
+            emb_model = e_model
+            update_env_file("DEVOPS_EMBEDDING_HOST", emb_host)
+            update_env_file("DEVOPS_EMBEDDING_MODEL", emb_model)
+    else:
+        typer.echo("   -> Using default: nomic-embed-text @ localhost")
+        update_env_file("DEVOPS_EMBEDDING_HOST", emb_host)
+        update_env_file("DEVOPS_EMBEDDING_MODEL", emb_model)
+
+    # ---------------------------------------------------------
+    # 4. SUMMARY
     # ---------------------------------------------------------
     typer.echo("\n" + "="*50)
     typer.echo("✅ Configuration Complete:")
-    typer.echo(f"🧠 Smart Model: {smart_model} @ {smart_host}")
-    typer.echo(f"⚡ Fast Model:  {fast_model} @ {fast_host}")
+    typer.echo(f"🧠 Smart Model:     {smart_model} @ {smart_host}")
+    typer.echo(f"⚡ Fast Model:      {fast_model} @ {fast_host}")
+    typer.echo(f"🔍 Embedding Model: {emb_model} @ {emb_host}")
     typer.echo("="*50 + "\n")
 
     # ---------------------------------------------------------
-    # 4. START SERVERS
+    # 4. SYNC TOOL INDEX (Auto-generate embeddings + templates)
+    # ---------------------------------------------------------
+    typer.echo("🔄 Syncing tool index (auto-generating embeddings & templates)...")
+    try:
+        from .tool_indexer import sync_tool_index
+        stats = sync_tool_index(verbose=False)
+        typer.echo(f"   ✅ Indexed {stats['total_tools']} tools ({stats['new_embeddings']} new embeddings)")
+    except Exception as e:
+        typer.echo(f"   ⚠️  Tool indexing skipped: {e}")
+    
+    # ---------------------------------------------------------
+    # 5. START SERVERS
     # ---------------------------------------------------------
     typer.echo("🚀 Starting ALL MCP Servers...")
     base_cmd = [sys.executable, "-m", "devops_agent.cli"]
@@ -570,8 +598,13 @@ def start_all_servers():
     
     typer.echo("   • Launching Remote K8s Server (Port 8082)...")
     subprocess.Popen(base_cmd + ["remote-k8s-server", "--port", "8082"], creationflags=subprocess.CREATE_NEW_CONSOLE)
+    
+    typer.echo("   • Launching API Server (Port 8088)...")
+    subprocess.Popen([sys.executable, "-m", "devops_agent.api_server"], creationflags=subprocess.CREATE_NEW_CONSOLE)
 
-    typer.echo("\n✨ All servers are running! Run 'devops-agent chat' to start.")
+    typer.echo("\n✨ All servers are running!")
+    typer.echo("   🌐 Web UI: cd ui && bun run dev")
+    typer.echo("   💬 CLI:    devops-agent chat")
 
 def update_env_file(key: str, value: str):
     import os
@@ -597,6 +630,14 @@ def update_env_file(key: str, value: str):
     with open(env_path, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
 
+@app.command(name="analyze-performance")
+def analyze_performance():
+    """
+    Analyze slow queries and suggest new templates.
+    """
+    from .telemetry.optimizer import analyze_slow_queries
+    analyze_slow_queries()
+
 @app.command(name="list-tools")
 def list_tools():
     """List all available Docker tools."""
@@ -614,6 +655,142 @@ def list_tools():
     typer.echo("\n☸️  Kubernetes Tools:")
     for tool in k8s_tools_schema:
         typer.echo(f"• {tool['name']}: {tool['description']}")
+
+# =============================================
+# RAG Index Management Commands
+# =============================================
+rag_app = typer.Typer(help="Manage RAG (FAISS) tool embeddings index")
+app.add_typer(rag_app, name="rag")
+
+@rag_app.command(name="list")
+def rag_list():
+    """List all indexed tools in FAISS."""
+    try:
+        from .rag.faiss_index import get_faiss_index
+        faiss_idx = get_faiss_index()
+        tools = faiss_idx.list_all()
+        
+        if not tools:
+            typer.echo("📭 No tools indexed yet. Run 'devops-agent rag rebuild' to create index.")
+            return
+            
+        typer.echo(f"📋 FAISS Index ({len(tools)} tools):\n")
+        for t in tools:
+            typer.echo(f"  [{t['idx']:3d}] {t['name']}")
+            if t.get('description'):
+                typer.echo(f"        └─ {t['description'][:60]}...")
+    except Exception as e:
+        typer.echo(f"❌ Error: {e}")
+
+@rag_app.command(name="info")
+def rag_info(tool_name: str = typer.Argument(..., help="Name of the tool to inspect")):
+    """Show detailed info about a specific tool's embedding."""
+    try:
+        from .rag.faiss_index import get_faiss_index
+        faiss_idx = get_faiss_index()
+        info = faiss_idx.get_info(tool_name)
+        
+        if not info:
+            typer.echo(f"❌ Tool '{tool_name}' not found in FAISS index.")
+            return
+            
+        typer.echo(f"\n🔍 Tool: {info['name']}")
+        typer.echo(f"   Index: {info['idx']}")
+        typer.echo(f"   Description: {info['description']}")
+        typer.echo(f"   Indexed: ✅")
+    except Exception as e:
+        typer.echo(f"❌ Error: {e}")
+
+@rag_app.command(name="remove")
+def rag_remove(tool_name: str = typer.Argument(..., help="Name of the tool to remove")):
+    """Remove a specific tool from the FAISS index."""
+    try:
+        from .rag.faiss_index import get_faiss_index
+        faiss_idx = get_faiss_index()
+        
+        if faiss_idx.remove(tool_name):
+            typer.echo(f"✅ Removed '{tool_name}' from FAISS index.")
+            typer.echo("   ⚠️  Run 'devops-agent rag rebuild' to regenerate a clean index.")
+        else:
+            typer.echo(f"❌ Tool '{tool_name}' not found in index.")
+    except Exception as e:
+        typer.echo(f"❌ Error: {e}")
+
+@rag_app.command(name="clear")
+def rag_clear(force: bool = typer.Option(False, "--force", "-f", help="Skip confirmation")):
+    """Clear all embeddings from the FAISS index."""
+    if not force:
+        confirm = typer.confirm("⚠️  This will delete ALL tool embeddings. Continue?")
+        if not confirm:
+            typer.echo("Cancelled.")
+            return
+    
+    try:
+        from .rag.faiss_index import get_faiss_index
+        faiss_idx = get_faiss_index()
+        faiss_idx.clear()
+        typer.echo("✅ FAISS index cleared.")
+    except Exception as e:
+        typer.echo(f"❌ Error: {e}")
+
+@rag_app.command(name="rebuild")
+def rag_rebuild():
+    """Rebuild the FAISS index from scratch using all registered tools."""
+    typer.echo("🔄 Rebuilding FAISS index from scratch...")
+    
+    try:
+        from .rag.faiss_index import get_faiss_index
+        from .tools import get_tools_schema
+        from .k8s_tools import get_k8s_tools_schema
+        from .llm.ollama_client import get_embeddings
+        
+        # Clear existing index
+        faiss_idx = get_faiss_index()
+        faiss_idx.clear()
+        
+        # Get all tools
+        all_tools = get_tools_schema() + get_k8s_tools_schema()
+        typer.echo(f"   Found {len(all_tools)} tools")
+        
+        # Generate embeddings and add to index
+        success = 0
+        for tool in all_tools:
+            name = tool['name']
+            text = f"{name}: {tool.get('description', '')}"
+            emb = get_embeddings(text)
+            if emb:
+                faiss_idx.add(name, emb, tool.get('description', ''))
+                success += 1
+                typer.echo(f"   ✅ {name}")
+            else:
+                typer.echo(f"   ❌ {name} (embedding failed)")
+        
+        typer.echo(f"\n✅ Rebuilt FAISS index with {success}/{len(all_tools)} tools")
+    except Exception as e:
+        typer.echo(f"❌ Error: {e}")
+
+@rag_app.command(name="verify")
+def rag_verify():
+    """Verify FAISS index consistency and health."""
+    try:
+        from .rag.faiss_index import get_faiss_index
+        faiss_idx = get_faiss_index()
+        result = faiss_idx.verify()
+        
+        if result["valid"]:
+            typer.echo("✅ FAISS Index Health: GOOD")
+        else:
+            typer.echo("⚠️  FAISS Index Health: ISSUES FOUND")
+            
+        typer.echo(f"   Tools indexed: {result['tool_count']}")
+        typer.echo(f"   FAISS vectors: {result['index_size']}")
+        
+        if result["issues"]:
+            typer.echo("\n❌ Issues:")
+            for issue in result["issues"]:
+                typer.echo(f"   • {issue}")
+    except Exception as e:
+        typer.echo(f"❌ Error: {e}")
         
 @app.callback(invoke_without_command=True)
 def cli_entry_callback(

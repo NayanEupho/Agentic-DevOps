@@ -54,6 +54,25 @@ class SessionRepository:
             )
         ''')
         
+        # Thoughts Table (Separate from messages for clean LLM context)
+        # Stores the "thinking process" for each assistant message
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS thoughts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                message_id INTEGER NOT NULL,
+                type TEXT,
+                content TEXT,
+                sequence INTEGER,
+                FOREIGN KEY(message_id) REFERENCES messages(id) ON DELETE CASCADE
+            )
+        ''')
+        
+        conn.commit()
+        
+        # Performance Indexes
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_thoughts_message_id ON thoughts(message_id)')
+        
         conn.commit()
         conn.close()
 
@@ -96,15 +115,37 @@ class SessionRepository:
         cursor.execute("SELECT * FROM messages WHERE session_id = ? ORDER BY id ASC", (session_id,))
         message_rows = cursor.fetchall()
         
+        # Get all thoughts for this session's messages in one query (efficient)
+        message_ids = [row["id"] for row in message_rows]
+        thoughts_map = {}
+        if message_ids:
+            placeholders = ",".join("?" * len(message_ids))
+            cursor.execute(
+                f"SELECT * FROM thoughts WHERE message_id IN ({placeholders}) ORDER BY message_id, sequence",
+                message_ids
+            )
+            for t_row in cursor.fetchall():
+                mid = t_row["message_id"]
+                if mid not in thoughts_map:
+                    thoughts_map[mid] = []
+                thoughts_map[mid].append({
+                    "type": t_row["type"],
+                    "content": t_row["content"]
+                })
+        
         conn.close()
         
         messages = []
         for row in message_rows:
-            messages.append({
+            msg = {
                 "role": row["role"],
                 "content": row["content"],
                 "timestamp": row["timestamp"]
-            })
+            }
+            # Attach thoughts if available (only for assistant messages)
+            if row["id"] in thoughts_map:
+                msg["thoughts"] = thoughts_map[row["id"]]
+            messages.append(msg)
             
         return {
             "id": session_row["id"],
@@ -120,21 +161,24 @@ class SessionRepository:
         conn = self._get_connection()
         cursor = conn.cursor()
         
-        cursor.execute("SELECT * FROM sessions ORDER BY last_activity DESC")
+        # Single query with message count (fixes N+1)
+        cursor.execute("""
+            SELECT s.*, COUNT(m.id) as msg_count 
+            FROM sessions s 
+            LEFT JOIN messages m ON s.id = m.session_id 
+            GROUP BY s.id 
+            ORDER BY s.last_activity DESC
+        """)
         rows = cursor.fetchall()
         
         sessions = []
         for row in rows:
-            # For list view, we just need the count of messages, not content
-            cursor.execute("SELECT COUNT(*) FROM messages WHERE session_id = ?", (row["id"],))
-            msg_count = cursor.fetchone()[0]
-            
             sessions.append({
                 "id": row["id"],
                 "title": row["title"],
                 "created_at": row["created_at"],
                 "last_activity": row["last_activity"],
-                "message_count": msg_count
+                "message_count": row["msg_count"]
             })
             
         conn.close()
@@ -145,12 +189,14 @@ class SessionRepository:
         timestamp = datetime.now().isoformat()
         conn = self._get_connection()
         cursor = conn.cursor()
+        message_id = None
         
         try:
             cursor.execute(
                 "INSERT INTO messages (session_id, role, content, timestamp) VALUES (?, ?, ?, ?)",
                 (session_id, role, content, timestamp)
             )
+            message_id = cursor.lastrowid  # Get the inserted message ID
             
             # Update session last_activity
             cursor.execute(
@@ -161,6 +207,32 @@ class SessionRepository:
             conn.commit()
         except Exception as e:
             print(f"⚠️  Database error adding message: {e}")
+        finally:
+            conn.close()
+        
+        return message_id  # Return ID for linking thoughts
+
+    def add_thoughts(self, message_id: int, thoughts: List[Dict[str, Any]]):
+        """Add thoughts for a message. Uses batch insert for performance."""
+        if not thoughts or not message_id:
+            return
+        
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        try:
+            # Batch insert with sequence for ordering
+            data = [
+                (message_id, t.get("type", "thought"), t.get("content", ""), idx)
+                for idx, t in enumerate(thoughts)
+            ]
+            cursor.executemany(
+                "INSERT INTO thoughts (message_id, type, content, sequence) VALUES (?, ?, ?, ?)",
+                data
+            )
+            conn.commit()
+        except Exception as e:
+            print(f"⚠️  Database error adding thoughts: {e}")
         finally:
             conn.close()
 

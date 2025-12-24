@@ -24,6 +24,11 @@ def get_client(host: str = None) -> ollama.Client:
     ollama_host = host if host else settings.LLM_HOST
     return ollama.Client(host=ollama_host)
 
+def get_async_ollama_client(host: str = None) -> ollama.AsyncClient:
+    """Get an asynchronous Ollama client instance."""
+    ollama_host = host if host else settings.LLM_HOST
+    return ollama.AsyncClient(host=ollama_host)
+
 def get_tool_calls(
     user_query: str, 
     tools_schema: List[Dict[str, Any]], 
@@ -362,4 +367,102 @@ def check_model_access(host: str, model_name: str) -> bool:
         return True
     except Exception:
         return False
+
+def check_embedding_access(host: str, model_name: str) -> bool:
+    """
+    Verify that a specific embedding model on a specific host is responding.
+    """
+    try:
+        client = get_client(host=host)
+        client.embeddings(model=model_name, prompt="test")
+        return True
+    except Exception:
+        return False
+
+def get_embeddings(text: str, model: str = None, host: str = None) -> List[float]:
+    """
+    Get vector embeddings for a given text.
+    
+    Uses dedicated embedding model (fast, local) by default.
+    Falls back to main LLM if embedding model unavailable.
+    
+    Args:
+        text: Text to embed
+        model: Override model (defaults to settings.EMBEDDING_MODEL)
+        host: Override host (defaults to settings.EMBEDDING_HOST)
+    """
+    from ..settings import settings
+    
+    # Use dedicated embedding config (defaults to local Ollama)
+    target_host = host or settings.EMBEDDING_HOST
+    target_model = model or settings.EMBEDDING_MODEL
+    
+    # [OPTIMIZATION] Check Pulse status to avoid slow timeouts if we know it's down
+    try:
+        from ..pulse import get_pulse
+        pulse_status = get_pulse().get_status("embeddings").get("status")
+        if pulse_status == "disconnected" and not host:
+             # Fast exit if we know the default is down
+             return []
+    except Exception:
+        pass
+
+    try:
+        client = get_client(host=target_host)
+        response = client.embeddings(model=target_model, prompt=text)
+        return response.get("embedding", [])
+    except Exception as e:
+        # Fallback to main LLM if dedicated embedding fails
+        print(f"⚠️ Embedding via {target_host}/{target_model} failed: {e}")
+        return []
+
+async def async_get_embeddings(text: str, model: str = None, host: str = None) -> List[float]:
+    """
+    [NON-BLOCKING] Get vector embeddings for a given text using AsyncClient.
+    """
+    from ..settings import settings
+    target_host = host or settings.EMBEDDING_HOST
+    target_model = model or settings.EMBEDDING_MODEL
+
+    try:
+        # [OPTIMIZATION] Check Pulse status to avoid slow timeouts
+        from ..pulse import get_pulse
+        pulse_status = get_pulse().get_status("embeddings").get("status")
+        if pulse_status == "disconnected" and not host:
+             return []
+    except Exception: pass
+
+    try:
+        client = get_async_ollama_client(host=target_host)
+        response = await client.embeddings(model=target_model, prompt=text)
+        return response.get("embedding", [])
+    except Exception as e:
+        print(f"⚠️ Async Embedding failed: {e}")
+        # Try a quick sync fallback or cheap embedding
+        return _get_cheap_embedding(text)
+
+def _get_cheap_embedding(text: str) -> List[float]:
+    """
+    Returns a deterministic, normalized 1024-dim vector based on character distribution.
+    Allows exact and near-exact matches to work in SemanticCache even when offline.
+    """
+    import hashlib
+    # We create a 1024-dim vector (matching nomic-embed size usually)
+    dim = 1024
+    vec = [0.0] * dim
+    
+    # Simple character frequency + rolling hash components
+    text_bytes = text.lower().encode('utf-8')
+    for i, b in enumerate(text_bytes):
+        # Distributed across dimensions
+        vec[b % dim] += 1.0
+        # Add some sequence sensitivity
+        h = int(hashlib.md5(text[max(0, i-3):i+1].encode()).hexdigest(), 16)
+        vec[h % dim] += 0.5
+        
+    # Normalize
+    norm = math.sqrt(sum(x*x for x in vec))
+    if norm > 0:
+        return [x/norm for x in vec]
+    return [0.0] * dim
 

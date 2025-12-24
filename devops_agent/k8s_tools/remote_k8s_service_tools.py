@@ -29,70 +29,75 @@ class RemoteK8sListServicesTool(K8sTool):
                 "all_namespaces": {
                     "type": "boolean",
                     "description": "If true, list services from all namespaces."
+                },
+                "label_selector": {
+                    "type": "string",
+                    "description": "Filter services by labels. Use standard Kubernetes label selector syntax."
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of services to return. Default is 50."
                 }
             },
             "required": []
         }
 
-    def run(self, namespace: str = "default", all_namespaces: bool = False, **kwargs) -> Dict[str, Any]:
-        try:
-            # Handle empty string namespace from LLM
-            if not namespace and not all_namespaces:
-                namespace = "default"
+    def run(self, namespace: str = "default", all_namespaces: bool = False, label_selector: str = None, limit: int = 50, **kwargs) -> Dict[str, Any]:
+        from .k8s_utils import safe_k8s_request
+        # Handle empty string namespace from LLM
+        if not namespace and not all_namespaces:
+            namespace = "default"
 
-            # Construct API URL
-            if all_namespaces:
-                url = f"{k8s_config.get_api_url()}/api/v1/services" 
-            elif namespace:
-                 safe_ns = quote(namespace)
-                 url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_ns}/services"
-            else:
-                 # Fallback (should be covered by top check, but safe to keep)
-                 url = f"{k8s_config.get_api_url()}/api/v1/namespaces/default/services"
+        # Construct API URL
+        if all_namespaces:
+            url = f"{k8s_config.get_api_url()}/api/v1/services" 
+        elif namespace:
+             safe_ns = quote(namespace)
+             url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_ns}/services"
+        else:
+             url = f"{k8s_config.get_api_url()}/api/v1/namespaces/default/services"
 
-            # Make Request
-            response = requests.get(
-                url,
-                headers=k8s_config.get_headers(),
-                verify=k8s_config.get_verify_ssl(),
-                timeout=10
-            )
-            response.raise_for_status()
-            data = response.json()
+        # Prepare query parameters
+        params = {}
+        if label_selector: params['labelSelector'] = label_selector
+        if limit: params['limit'] = limit
+        
+        # If there are params, append them to URL for safe_k8s_request (which currently doesn't take params separately)
+        # TODO: Update safe_k8s_request to handle params, or append here.
+        if params:
+            import urllib.parse
+            url += "?" + urllib.parse.urlencode(params)
 
-            # Parse results
-            services = []
-            for item in data.get('items', []):
-                metadata = item.get('metadata', {})
-                spec = item.get('spec', {})
-                status = item.get('status', {})
-                
-                ports = []
-                for p in spec.get('ports', []):
-                    ports.append(f"{p.get('port')}:{p.get('targetPort')}/{p.get('protocol')}")
+        res = safe_k8s_request("GET", url, k8s_config.get_headers(), k8s_config.get_verify_ssl())
+        if not res["success"]:
+            return res
 
-                services.append({
-                    "name": metadata.get('name'),
-                    "namespace": metadata.get('namespace'),
-                    "type": spec.get('type'),
-                    "cluster_ip": spec.get('clusterIP'),
-                    "external_ips": spec.get('externalIPs', []),
-                    "ports": ports,
-                    "creation_timestamp": metadata.get('creationTimestamp')
-                })
+        data = res["data"]
+        services = []
+        for item in data.get('items', []):
+            metadata = item.get('metadata', {})
+            spec = item.get('spec', {})
+            
+            ports = []
+            for p in spec.get('ports', []):
+                ports.append(f"{p.get('port')}:{p.get('targetPort')}/{p.get('protocol')}")
 
-            return {
-                "success": True,
-                "services": services,
-                "count": len(services),
-                "scope": "all namespaces" if all_namespaces else f"namespace '{namespace}'"
-            }
+            services.append({
+                "name": metadata.get('name'),
+                "namespace": metadata.get('namespace'),
+                "type": spec.get('type'),
+                "cluster_ip": spec.get('clusterIP'),
+                "external_ips": spec.get('externalIPs', []),
+                "ports": ports,
+                "creation_timestamp": metadata.get('creationTimestamp')
+            })
 
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
+        return {
+            "success": True,
+            "services": services,
+            "count": len(services),
+            "scope": "all namespaces" if all_namespaces else f"namespace '{namespace}'"
+        }
 
 class RemoteK8sGetServiceTool(K8sTool):
     """
@@ -118,60 +123,43 @@ class RemoteK8sGetServiceTool(K8sTool):
         }
 
     def run(self, service_name: str = None, namespace: str = "default", **kwargs) -> Dict[str, Any]:
+        from .k8s_utils import safe_k8s_request
         if not service_name:
-            return {
-                "success": False,
-                "error": "Service name is required. To list services, use remote_k8s_list_services instead."
-            }
+            return {"success": False, "error": "Service name is required."}
         
-        # Handle empty string namespace from LLM
-        if not namespace: 
-            namespace = "default"
+        if not namespace: namespace = "default"
 
-        try:
-            safe_name = quote(service_name)
-            safe_ns = quote(namespace)
-            
-            url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_ns}/services/{safe_name}"
+        safe_name = quote(service_name)
+        safe_ns = quote(namespace)
+        url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_ns}/services/{safe_name}"
 
-            response = requests.get(
-                url,
-                headers=k8s_config.get_headers(),
-                verify=k8s_config.get_verify_ssl(),
-                timeout=10
-            )
-            response.raise_for_status()
-            data = response.json()
-            
-            metadata = data.get('metadata', {})
-            spec = data.get('spec', {})
-            status = data.get('status', {})
+        res = safe_k8s_request("GET", url, k8s_config.get_headers(), k8s_config.get_verify_ssl())
+        if not res["success"]:
+            return res
 
-            # Detailed info
-            details = {
-                "name": metadata.get('name'),
-                "namespace": metadata.get('namespace'),
-                "labels": metadata.get('labels', {}),
-                "annotations": metadata.get('annotations', {}),
-                "selector": spec.get('selector', {}),
-                "type": spec.get('type'),
-                "cluster_ip": spec.get('clusterIP'),
-                "external_ips": spec.get('externalIPs', []),
-                "load_balancer_ip": status.get('loadBalancer', {}).get('ingress', []),
-                "ports": spec.get('ports', []),
-                "session_affinity": spec.get('sessionAffinity')
-            }
+        data = res["data"]
+        metadata = data.get('metadata', {})
+        spec = data.get('spec', {})
+        status = data.get('status', {})
 
-            return {
-                "success": True,
-                "service": details
-            }
+        details = {
+            "name": metadata.get('name'),
+            "namespace": metadata.get('namespace'),
+            "labels": metadata.get('labels', {}),
+            "annotations": metadata.get('annotations', {}),
+            "selector": spec.get('selector', {}),
+            "type": spec.get('type'),
+            "cluster_ip": spec.get('clusterIP'),
+            "external_ips": spec.get('externalIPs', []),
+            "load_balancer_ip": status.get('loadBalancer', {}).get('ingress', []),
+            "ports": spec.get('ports', []),
+            "session_affinity": spec.get('sessionAffinity')
+        }
 
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e)
-            }
+        return {
+            "success": True,
+            "service": details
+        }
 
 class RemoteK8sDescribeServiceTool(K8sTool):
     """
@@ -197,88 +185,61 @@ class RemoteK8sDescribeServiceTool(K8sTool):
         }
 
     def run(self, service_name: str, namespace: str = "default", **kwargs) -> Dict[str, Any]:
-        try:
-            safe_name = quote(service_name)
-            safe_ns = quote(namespace)
-            
-            # 1. Get Service Details
-            url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_ns}/services/{safe_name}"
-            response = requests.get(
-                url,
-                headers=k8s_config.get_headers(),
-                verify=k8s_config.get_verify_ssl(),
-                timeout=10
-            )
-            response.raise_for_status()
-            data = response.json()
+        from .k8s_utils import safe_k8s_request
+        safe_name = quote(service_name)
+        safe_ns = quote(namespace)
+        
+        # 1. Get Service Details
+        url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_ns}/services/{safe_name}"
+        res = safe_k8s_request("GET", url, k8s_config.get_headers(), k8s_config.get_verify_ssl())
+        
+        if not res["success"]:
+            return res
 
-            # 2. Get Events
-            events_url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_ns}/events?fieldSelector=involvedObject.name={safe_name},involvedObject.namespace={safe_ns},involvedObject.kind=Service"
-            events_resp = requests.get(
-                events_url,
-                headers=k8s_config.get_headers(),
-                verify=k8s_config.get_verify_ssl(),
-                timeout=10
-            )
-            events = []
-            if events_resp.ok:
-                for e in events_resp.json().get('items', []):
-                    events.append({
-                        "type": e.get('type'),
-                        "reason": e.get('reason'),
-                        "message": e.get('message'),
-                        "count": e.get('count', 1),
-                        "last_timestamp": e.get('lastTimestamp')
-                    })
-            
-            # 3. Get Endpoints (Optional but helpful for describe service)
-            ep_url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_ns}/endpoints/{safe_name}"
-            ep_resp = requests.get(
-                ep_url,
-                headers=k8s_config.get_headers(),
-                verify=k8s_config.get_verify_ssl(),
-                timeout=10
-            )
-            endpoints_list = []
-            if ep_resp.ok:
-                ep_data = ep_resp.json()
-                for subset in ep_data.get('subsets', []):
-                    for addr in subset.get('addresses', []):
-                        endpoints_list.append(f"{addr.get('ip')}")
+        data = res["data"]
 
-            metadata = data.get('metadata', {})
-            spec = data.get('spec', {})
-            status = data.get('status', {})
+        # 2. Get Events
+        events_url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_ns}/events?fieldSelector=involvedObject.name={safe_name},involvedObject.namespace={safe_ns},involvedObject.kind=Service"
+        events_res = safe_k8s_request("GET", events_url, k8s_config.get_headers(), k8s_config.get_verify_ssl())
+        events = []
+        if events_res["success"]:
+            for e in events_res["data"].get('items', []):
+                events.append({
+                    "type": e.get('type'),
+                    "reason": e.get('reason'),
+                    "message": e.get('message'),
+                    "count": e.get('count', 1),
+                    "last_timestamp": e.get('lastTimestamp')
+                })
+        
+        # 3. Get Endpoints
+        ep_url = f"{k8s_config.get_api_url()}/api/v1/namespaces/{safe_ns}/endpoints/{safe_name}"
+        ep_res = safe_k8s_request("GET", ep_url, k8s_config.get_headers(), k8s_config.get_verify_ssl())
+        endpoints_list = []
+        if ep_res["success"]:
+            ep_data = ep_res["data"]
+            for subset in ep_data.get('subsets', []):
+                for addr in subset.get('addresses', []):
+                    endpoints_list.append(f"{addr.get('ip')}")
 
-            details = {
-                "name": metadata.get('name'),
-                "namespace": metadata.get('namespace'),
-                "labels": metadata.get('labels', {}),
-                "annotations": metadata.get('annotations', {}),
-                "selector": spec.get('selector', {}),
-                "type": spec.get('type'),
-                "cluster_ip": spec.get('clusterIP'),
-                "external_ips": spec.get('externalIPs', []),
-                "ports": spec.get('ports', []),
-                "endpoints": endpoints_list,
-                "events": events
-            }
+        metadata = data.get('metadata', {})
+        spec = data.get('spec', {})
 
-            return {
-                "success": True,
-                "service": details
-            }
+        details = {
+            "name": metadata.get('name'),
+            "namespace": metadata.get('namespace'),
+            "labels": metadata.get('labels', {}),
+            "annotations": metadata.get('annotations', {}),
+            "selector": spec.get('selector', {}),
+            "type": spec.get('type'),
+            "cluster_ip": spec.get('clusterIP'),
+            "external_ips": spec.get('externalIPs', []),
+            "ports": spec.get('ports', []),
+            "endpoints": endpoints_list,
+            "events": events
+        }
 
-        except requests.exceptions.HTTPError as e:
-            error_data = {"error": str(e)}
-            try:
-                if e.response is not None:
-                    error_data["raw_error"] = e.response.json()
-            except ValueError:
-                pass
-            return {
-                "success": False,
-                **error_data
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+        return {
+            "success": True,
+            "service": details
+        }

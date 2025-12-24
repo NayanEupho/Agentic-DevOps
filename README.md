@@ -35,50 +35,97 @@ An AI-powered DevOps assistant that understands natural language commands. Contr
 - **Command Chaining:** Execute multiple actions in a single query (e.g., "Start nginx and list pods").
 - **Parallel Execution:** Independent tools are executed in parallel for faster performance.
 - **Remote Ollama Support:** Connect to powerful remote LLMs (e.g., on HPC or cloud) while keeping the agent local. "Hot-swap" models instantly.
+- **High-Performance Intent Routing:**
+    - **Smart Match (Regex):** Zero-latency extraction of namespaces, status phases, and resource names (~1ms) bypassing the LLM.
+    - **Semantic Similarity:** Vector-based intent matching for natural language variations (~50ms).
+    - **RAG Tool Selection:** Dynamically retrieves only relevant tool schemas (Top-K) to minimize prompt overhead.
+- **Advanced Control & Filtering:**
+    - **Server-Side Filtering:** Native `labelSelector` and `fieldSelector` support for Pods, Nodes, Deployments, and Services.
+    - **Smart Pagination:** Automatic `limit` parameters and "Smart Summaries" (e.g., `Running: 45 | Pending: 5`) for large datasets.
+    - **Adaptive Truncation:** Large result sets are truncated in the UI with tips on how to filter further, preventing context overflow.
 - **Interactive Chat Mode:** Permanent REPL session with context memory (`devops-agent chat`).
 - **Reliability Engine:**
+    - **Smart MCP Routing:** Automatically detects which tools (Docker, Local K8s, Remote K8s) are needed for a query, optimizing speed and context window.
+    - **Sticky Context:** Intelligent "Follow-up" mode. Remembers if you were working on Remote or Local K8s and routes queries like "describe it" accordingly.
     - **Fast/Smart Modes:** Automatically switches between "Fast Mode" (Zero-Shot) for simple queries and "Smart Mode" (Chain-of-Thought) for complex reasoning.
     - **ReAct Prompting:** Agent "thinks" before acting to improve intent detection.
     - **Self-Correction:** Validates tool calls and auto-retries if the LLM hallucinates arguments.
     - **Live Context:** Injects real-time cluster state (running pods/containers) into the prompt to prevent "hallucinated resource" errors.
 - **Advanced Inspection:** Comprehensive `describe` tools for Remote K8s (Pods, Services, Namespaces, Nodes) with event logs and status details.
+- **UI Routing Overrides:** Manually force the agent into "Docker Only", "Remote K8s Only", or "Chat Only" modes via the Web UI for specialized tasks.
 - **Auto-Proxy Config:** Automatically bypasses `NO_PROXY` settings for localhost to prevent connectivity issues in corporate environments.
 - **Mix-and-Match Hosts:** Flexible configuration allows Primary (Smart) and Fast models to run on ANY combination of Local or Remote hosts.
 - **In-App Model Downloading:** Directly pull missing models via the CLI wizard without leaving the agent.
 - **Enhanced Debugging:** "Raw API Error" reporting reveals the exact JSON response from Kubernetes for easier troubleshooting (e.g., distinguishing 403 vs 404).
+- **Human-in-the-Loop Safety:** Approval Cards in CLI and Web UI for destructive action confirmation with risk analysis.
+- **Dedicated Embedding Model:** Separate lightweight model (`nomic-embed-text`) for fast RAG/semantic search (~20ms vs ~1000ms) stored in a local **FAISS** vector index.
+- **Visual "Thinking" UI:** Next.js interface now displays the agent's internal "Chain of Thought" in a collapsible, DeepSeek-style container with real-time timers and step tracking.
+- **💓 Proactive Infrastructure Pulse**: Real-time monitoring engine (`pulse.py`) that periodically checks connectivity and health for all MCP providers, providing "Zero-Latency" status dashboarding.
+- **🩺 Intelligent Error Diagnosis**: Specialized `ErrorAnalyzer` that transforms cryptic JSON API failures into clear, natural language explanations and actionable "Next Steps".
+- **🗺️ Global Infrastructure Map**: Implicit discovery of resources across all namespaces and providers. The agent "knows" where your pod is, even if you don't specify the namespace.
+- **🛡️ Enriched Security Intercepts**: Advanced risk assessment with detailed `impact_analysis` (e.g., "Stopping this container will interrupt the 'auth-service'").
+- **⚡ "Lightning Fast" Performance Patches**:
+    - **Pooled Connections**: Shared `httpx.AsyncClient` with connection pooling for ultra-low latency tool calls (~2ms overhead).
+    - **Async-First Intelligence**: Fully asynchronous Semantic Cache and Tool Retriever, eliminating blocking I/O during reasoning.
+    - **Self-Healing Pulse**: Background health checks with TTL-based index pruning for a lean, always-accurate resource map.
+    - **Modular Output**: registry-based result formatting for faster rendering and cleaner maintenance.
+- **Modern Web UI:** Next.js-based dashboard with real-time streaming (SSE), session management, and glassmorphic design.
 
 ## Architecture
 
 ```mermaid
 graph TD
-    User[User] -->|Natural Language Command| CLI["CLI (Typer)"]
-    CLI -->|Query| Agent[Agent Orchestrator]
-    Agent -->|1. Inject Context| StateFetcher["State Injection (Docker/K8s)"]
-    Agent -->|2. ReAct Loop| LLM["LLM (Ollama)"]
-    LLM -->|Thought + Action| Agent
-    Agent -->|3. Verify & Retry| Verifier[Semantic Verifier]
-    Verifier -- Invalid? --> LLM
-    Verifier -- Valid --> Safety[Safety Layer]
-    Safety -->|Confirmation?| User
-    Safety -->|Approved| MCP_Client[MCP Client]
+    User[User] -->|Browser| WebUI["Web UI (Next.js)"]
+    User -->|CLI Command| CLI["CLI (Typer)"]
+    WebUI -->|REST/SSE| API["API Server (FastAPI)"]
+    API -->|Query| Orchestrator[Agent Orchestrator]
+    CLI -->|Query| Orchestrator
+    
+    Orchestrator -->|1. Meta-Intent| Router["Intent Router (Regex/Semantic)"]
+    Router -->|Embedding| EmbModel["Embedding Model (Nomic-Embed)"]
+    Orchestrator -->|2. RAG Context| FAISS["FAISS Index (Vector Search)"]
+    FAISS -->|Top-K Tools| Orchestrator
+    
+    Orchestrator -->|3. ReAct Loop| LLM["Ollama (Smart/Fast Models)"]
+    LLM -->|Thought + Action| Orchestrator
+    
+    Orchestrator -->|4. Verify & Safety| Safety[Safety Layer]
+    Safety -- Destructive? --> UserConfirm{"User Approval"}
+    UserConfirm -- Deny --> Orchestrator
+    UserConfirm -- Approve --> MCP_Client[MCP Client]
     
     MCP_Client -->|docker_*| DockerServer[Docker MCP Server 8080]
     MCP_Client -->|k8s_*| LocalK8sServer[Local K8s MCP Server 8081]
     MCP_Client -->|remote_k8s_*| RemoteK8sServer[Remote K8s MCP Server 8082]
     
     DockerServer -->|Execute| Docker[Docker Engine]
-    LocalK8sServer -->|Execute| LocalK8s[Local K8s Cluster]
-    RemoteK8sServer -->|Execute| RemoteK8s[Remote K8s Cluster]
+    LocalK8sServer -->|Execute| LocalK8s[Local Cluster]
+    RemoteK8sServer -->|Execute| RemoteK8s[Remote Cluster]
     
-    DockerServer -->|Result| Agent
-    LocalK8sServer -->|Result| Agent
-    RemoteK8sServer -->|Result| Agent
-    Agent -->|Format Result| User
+    DockerServer -->|Result| Orchestrator
+    LocalK8sServer -->|Result| Orchestrator
+    RemoteK8sServer -->|Result| Orchestrator
+    Orchestrator -->|Streaming Result| WebUI
+    Orchestrator -->|Rich Output| CLI
+
+    subgraph Monitoring & Discovery
+        Pulse[Infrastructure Pulse]
+        Discovery[Implicit Resource Map]
+        Pulse -->|Health Data| Orchestrator
+        Orchestrator -->|Discovery Lookup| Discovery
+    end
+
+    subgraph Intelligence Layer
+        ErrorAnalyzer[AI Error Analyzer]
+        InsightAgent[Expert Insight Agent]
+        Orchestrator -->|Raw Failures| ErrorAnalyzer
+        Orchestrator -->|Execution Results| InsightAgent
+    end
 
     subgraph Data Persistence
         SessionManager[Session Manager]
         SessionManager <-->|devops_agent.db| Storage[(SQLite DB)]
-        Agent <-->|Read/Write History| SessionManager
+        Agent <-->|History| SessionManager
     end
 ```
 
@@ -87,9 +134,10 @@ graph TD
 - **Python 3.9 or higher:** Required for the project's dependencies.
 - **Docker Engine:** Must be installed and running on your machine.
 - **Ollama:** Must be installed to run local LLMs. Download from [https://ollama.com/](https://ollama.com/).
-- **`llama3.2` Model:** The system is configured to use the `llama3.2` model by default (3B parameters, optimized for edge).
-- **Kubernetes Cluster (Optional):** For local K8s commands, you need a cluster (e.g., Docker Desktop, Minikube) and `kubectl` in your PATH. The system automatically handles `kubectl proxy`.
-- **Remote K8s Access (Optional):** For remote K8s commands, you need access to the remote cluster.
+- **`qwen2.5:72b` or `llama3.2`:** The system is configurable but defaults to `qwen2.5:72b` for superior reasoning.
+- **`nomic-embed-text`:** Required for RAG functionality (auto-pulled by wizard).
+- **Kubernetes Cluster (Optional):** For local K8s commands.
+- **Remote K8s Access (Optional):** For remote K8s commands.
 
 ## Installation
 
@@ -123,7 +171,7 @@ graph TD
 
 ## Usage
 
-The system requires two main components to be running simultaneously: the Ollama service (providing the LLM) and the DevOps Agent MCP servers.
+The system requires two main components to be running simultaneously: the Ollama service and the DevOps Agent MCP servers.
 
 ### Step 1: Start Ollama Service
 
@@ -134,7 +182,6 @@ Open a **new terminal** window/tab.
     ```bash
     ollama serve
     ```
-    *Note: The system automatically configures `NO_PROXY` for localhost, so you don't need to manually bypass corporate proxies for local connections.*
 
 ### Step 2: Start MCP Servers (Interactive Setup)
 
@@ -147,23 +194,26 @@ Open **another new terminal** window/tab.
     ```
 3.  **Follow the Streamlined Wizard:**
     - **🤖 Smart Model Setup:** Select **Host** (Local/Remote) and **Model**.
-    - **⚡ Fast Model Setup:** Choose to reuse the Smart configuration or pick a different Host/Model for speed (e.g., Local Fast Model + Remote Smart Model).
-    - **[+] Download Models:** If a model isn't listed, select `[+] Download/Pull New Model` to fetch it instantly.
-    - **Summary:** Review your final configuration before servers launch.
+    - **⚡ Fast Model Setup:** Reuse Smart config or split hosts.
+    - **🔍 Embedding Setup:** Configure `nomic-embed-text` for RAG.
+    - **[+] Download Models:** Instantly pull missing models.
+    - **Summary:** Review and launch.
 
-    This will launch 3 separate processes in new windows:
-    - Docker MCP Server (Port 8080)
-    - Local K8s MCP Server (Port 8081)
-    - Remote K8s MCP Server (Port 8082)
+    This will launch 4 processes (API Server + 3 MCP Servers).
 
-    *Alternatively, you can start them individually:*
-    ```bash
-    devops-agent server --port 8080
-    devops-agent k8s-server --port 8081
-    devops-agent remote-k8s-server --port 8082
-    ```
+### Step 3: Start Web UI (Optional)
 
-### Step 3: Run Commands
+For a modern graphical interface:
+
+```bash
+cd ui
+npm install   # First time only
+npm run dev   # Starts on http://localhost:3000
+```
+
+See [ui/README_UI.md](ui/README_UI.md) for detailed UI documentation.
+
+### Step 3: Run Commands (CLI Mode)
 
 Open **a third terminal** window/tab for running your commands.
 
@@ -173,45 +223,22 @@ Open **a third terminal** window/tab for running your commands.
     **Docker Commands:**
     ```bash
     devops-agent run "List all containers"
-    devops-agent run "Start nginx on port 8080"
-    ```
-
-    **Local Kubernetes Commands:**
-    ```bash
-    devops-agent run "Show me the running nodes in my local machine"
-    devops-agent run "List pods in default namespace"
-    ```
-
-    **Remote Kubernetes Commands:**
-    ```bash
-    devops-agent run "Show me the running nodes in remote cluster"
-    devops-agent run "List pods in remote cluster"
-    # New Describe Capabilities:
-    devops-agent run "Describe pod n8n-workflow-123"
-    devops-agent run "Describe namespace kube-system"
-    devops-agent run "Describe service my-service"
     ```
 
     **Interactive Chat Mode:**
     ```bash
     devops-agent chat
-    # Type your queries, use /model to switch models, or exit to quit.
+    # Type /bye to exit
     ```
 
 ## Session Management
 
-The tool supports conversation sessions, allowing you to maintain context across multiple commands.
+The tool supports conversation sessions with persistent memory.
 
 **Start a Session:**
 ```bash
 devops-agent session start "Debugging Nginx"
 # Output: Session started with ID: <session_id>
-```
-
-**Run Commands in Session:**
-Once a session is started, all `run` commands automatically use it.
-```bash
-devops-agent run "Describe the first pod"  # Uses context from previous command
 ```
 
 **Manage Sessions:**
@@ -222,79 +249,18 @@ devops-agent session end    # End the current active session
 devops-agent session clear  # Clear all history
 ```
 
-**Interactive Chat Mode (REPL)**
+## RAG Tool Indexing (New!)
 
-Instead of running single commands, you can enter an interactive chat mode:
+To support hundreds of tools efficiently, we use a local **FAISS** vector index.
+
 ```bash
-devops-agent chat
+devops-agent rag list      # List indexed tool vectors
+devops-agent rag rebuild   # Regenerate index from scratch
+devops-agent rag verify    # Check index health
+devops-agent rag info docker_run_container # Inspect specific embedding
 ```
 
-**Features:**
-- **Persistent Session:** Remembers previous commands and outputs.
-- **Session Management:**
-  ```bash
-  devops-agent chat --session "Debug Nginx"      # Create named session
-  devops-agent chat --session-resume <id>        # Resume specific session
-  ```
-- **Hot Swap:** Switch models (Local vs. Remote) instantly inside the chat using `/model`.
-
-## Configuration
- 
-The default LLM model is `llama3.2`. You can change this by modifying `devops_agent/settings.py` or setting the `DEVOPS_LLM_MODEL` environment variable.
-
-### Remote Ollama (HPC / Cloud)
-You can connect to a remote Ollama instance (e.g., a powerful GPU server) instead of running strictly locally.
-1. Run `devops-agent start-all`.
-2. Select **[2] Remote / HPC** in the wizard.
-3. Enter the URL (e.g., `http://192.168.1.50:11434`).
-4. Select a model from the *remote* server.
-The CLI will visually indicate the context: `[Remote: llama3.1:70b]`.
-
-## Available Commands
-
-### Core CLI Commands
-
-- `devops-agent start-all`: **Recommended.** Starts all 3 MCP servers (Docker, Local K8s, Remote K8s) in separate processes.
-- `devops-agent run "<query>"`: Executes a command based on the natural language query.
-- `devops-agent session`: Access session management subcommands (`start`, `end`, `list`, `show`, `clear`).
-- `devops-agent status`: Checks the status of the LLM connection, MCP servers, and available tools.
-- `devops-agent list-tools`: Lists all available tools.
-
-### Server Commands (for manual control)
-
-- `devops-agent server`: Starts the Docker MCP server (default port 8080).
-- `devops-agent k8s-server`: Starts the Local Kubernetes MCP server (default port 8081).
-- `devops-agent remote-k8s-server`: Starts the Remote Kubernetes MCP server (default port 8082).
-
-### Natural Language Examples
-
-- **Docker:** `"Start nginx"`, `"Stop container my-nginx"`, `"List containers"`
-- **Local K8s:** `"List local nodes"`, `"Show pods in kube-system"`
-- **Remote K8s:** 
-    - `"List remote nodes"`
-    - `"Describe node kc-worker-1 in remote cluster"`
-    - `"List deployments in default namespace in remote k8s"`
-    - `"Describe deployment my-dep in remote k8s"`
-    - `"Find which namespace pod 'my-app' is in"`
-    - `"Get IPs for pod 'my-app'"`
-    - `"List all remote services"`
-    - `"List remote services in default namespace"`
-    - `"Get service n8n-service"`
-- **Command Chaining:** `"Start nginx and list all containers"`, `"List local pods and then list remote pods"`
-
-### Options for `run` Command
-
-- `query`: The natural language command (e.g., "Start an nginx container").
-- `--verbose` / `-v`: Show detailed logs of the agent's decision-making process.
-- `--no-confirm` / `-y`: Skip safety confirmation prompts (use with caution).
-- `--session` / `-s`: Resume a specific conversation session ID.
-- `--check-llm`: Force a connectivity test for the LLM before running (slower, but verifies model access). Default behavior skips this for speed.
-
-## Safety Features
-
-- **Confirmation Prompts:** Destructive operations prompt for confirmation.
-- **Input Validation:** Arguments are validated using Pydantic models.
-- **Safe Execution:** Uses official SDKs where possible.
+See [devops_agent/rag/README_RAG.md](devops_agent/rag/README_RAG.md) for deep technical details.
 
 ## Project Structure
 
@@ -302,28 +268,31 @@ The CLI will visually indicate the context: `[Remote: llama3.1:70b]`.
 devops-agent/
 ├── devops_agent/             # Main Python package
 │   ├── __init__.py
-│   ├── cli.py                # Command-Line Interface (Typer)
-│   ├── cli_helper.py         # CLI Wizard & TUI helpers
-│   ├── agent.py              # Orchestrates LLM, tools, safety
-│   ├── agent_module.py       # DSPy Agent definition
-│   ├── dspy_client.py        # DSPy Integration
-│   ├── safety.py             # Confirmation logic
-│   ├── settings.py           # Configuration management
-│   ├── database/             # Database layer
-│   │   ├── __init__.py
-│   │   ├── devops_agent.db   # SQLite database file (auto-created)
-│   │   ├── db.py             # SQL repository and schema
-│   │   └── session_manager.py # Manages conversation history/context
-│   ├── mcp/                  # Model Context Protocol components
-│   │   ├── server.py         # Docker MCP server
-│   │   ├── k8s_server.py     # Local K8s MCP server
-│   │   ├── remote_k8s_server.py # Remote K8s MCP server
-│   │   └── client.py         # MCP client with routing logic
-│   ├── tools/                # Docker tool definitions
-│   ├── k8s_tools/            # Kubernetes tool definitions
-│   └── llm/                  # LLM interaction components
+│   ├── cli.py                # CLI (Typer) + Wizard
+│   ├── cli_helper.py         # TUI helpers
+│   ├── agent.py              # Orchestrator (DSPy)
+│   ├── api_server.py         # FastAPI Backend (SSE)
+│   ├── safety.py             # Safety Layer (Confirmation)
+│   ├── settings.py           # Configuration (Pydantic)
+│   ├── database/             # SQLite Persistence
+│   ├── mcp/                  # MCP Client & Servers
+│   │   ├── server.py         # Docker Spoke
+│   │   ├── k8s_server.py     # Local K8s Spoke
+│   │   ├── remote_k8s_server.py # Remote K8s Spoke
+│   │   └── client.py         # JSON-RPC Client
+│   ├── rag/                  # RAG Engine
+│   │   ├── faiss_index.py    # Vector Store
+│   │   └── tool_retriever.py # Retrieval Logic
+│   ├── tools/                # Docker Tools
+│   ├── k8s_tools/            # Kubernetes Tools
+│   ├── formatters/           # Modular Output Formatters (New!)
+│   ├── llm/                  # Ollama Client
 ├── requirements.txt          # Python dependencies
-├── pyproject.toml            # Package build configuration
+├── pyproject.toml            # Build config
+├── ui/                       # Next.js Web UI
+│   ├── src/components/       # React Components (ThinkingProcess, etc)
+│   ├── README_UI.md          # UI Docs
+│   └── README_API.md         # Backend API Docs (New!)
 └── README.md                 # This file
 ```
 
